@@ -62,7 +62,8 @@ def add_translation_rotation_parameters(A, n_sites, lats, lons):
 
 def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=None, calculate_errors=False,
                                 reference_frame="CF", add_helmert=False, regularize=True,
-                                damping_factor=5e-3, degree_dependent=True, auto_dumping=False):
+                                damping_factor=5e-3, degree_dependent=True, auto_dumping=False,
+                                solving_system_method ='svd'):
     """
     Calculate load coefficients from site displacements using unified least squares adjustment.
 
@@ -154,17 +155,32 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
             P_nm = P[m, n]
             dP_nm_dz = dP[m, n]
 
-            # Convert to fully normalized Legendre functions (4π normalization)
-            if m == 0:
-                norm_factor = np.sqrt((2 * n + 1))
-            else:
-                norm_factor = np.sqrt(2 * (2 * n + 1) *
-                                      scipy.special.factorial(n - m) /
-                                      scipy.special.factorial(n + m))
+            if 0:
+                # Convert to fully normalized Legendre functions (4π normalization)
+                if m == 0:
+                    norm_factor = np.sqrt((2 * n + 1))
+                else:
+                    norm_factor = np.sqrt(2 * (2 * n + 1) *
+                                          scipy.special.factorial(n - m) /
+                                          scipy.special.factorial(n + m))
 
-            # Apply normalization
-            P_nm_norm = P_nm * norm_factor
-            dP_nm_dz_norm = dP_nm_dz * norm_factor
+                # Apply normalization
+                P_nm_norm = P_nm * norm_factor
+                dP_nm_dz_norm = dP_nm_dz * norm_factor
+            if 1:
+                # Convert to fully normalized Legendre functions (4π normalization)
+                if m == 0:
+                    norm_factor = np.sqrt((2 * n + 1))
+                else:
+                    # More stable calculation using log factorials
+                    log_norm = 0.5 * (np.log(2) + np.log(2 * n + 1) +
+                                      scipy.special.gammaln(n - m + 1) -
+                                      scipy.special.gammaln(n + m + 1))
+                    norm_factor = np.exp(log_norm)
+
+                # Apply normalization
+                P_nm_norm = P_nm * norm_factor
+                dP_nm_dz_norm = dP_nm_dz * norm_factor
 
             # Compute derivative with respect to phi
             dP_nm_dphi = -np.sin(phi_i) * dP_nm_dz_norm
@@ -177,9 +193,12 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
             # Factor to convert between load and displacement
             # This follows Wahr et al. (1998) formulation
             factor = (rho_E / 3.0) * ((2.0 * n + 1.0) / (1.0 + transformed_love_numbers['k_n'][n]))
+            # const = 4.0 * np.pi * R_E ** 3 / M_E
+            # factor = const / (2.0 * n + 1.0)
 
             # NORTH component coefficients
-            north_factor = (l_n * factor * dP_nm_dphi) / R_E
+            # north_factor = (l_n * factor * dP_nm_dphi) / R_E
+            north_factor = -factor * l_n * dP_nm_dphi / R_E
 
             # C coefficient (cosine term)
             c_idx = coeff_idx.get((n, m, 'C'))
@@ -192,7 +211,8 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
 
             # EAST component coefficients
             if abs(cos_phi) > 1e-10:  # Avoid division by zero near poles
-                east_factor = (l_n * factor * (m / cos_phi) * P_nm_norm) / R_E
+                # east_factor = (l_n * factor * (m / cos_phi) * P_nm_norm) / R_E
+                east_factor = -factor * l_n * (m / cos_phi) * P_nm_norm / R_E
 
                 # C coefficient (sine term with negative sign because of partial derivative)
                 A[i + n_sites, c_idx] = -east_factor * sin_m_lam
@@ -202,7 +222,8 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
                     A[i + n_sites, s_idx] = east_factor * cos_m_lam
 
             # UP/VERTICAL component coefficients
-            up_factor = (h_n * factor * P_nm_norm) / R_E
+            # up_factor = (h_n * factor * P_nm_norm) / R_E
+            up_factor = factor * h_n * P_nm_norm / R_E
 
             # C coefficient (cosine term)
             A[i + 2 * n_sites, c_idx] = up_factor * cos_m_lam
@@ -241,24 +262,63 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
         print(f"Matrix dimensions before regularization: {orig_rows} x {n_coeffs}")
         print(f"Matrix dimensions after regularization: {A.shape[0]} x {A.shape[1]}")
 
-    # Solve the system using SVD
-    u_svd, s_vals, vh_svd = scipy.linalg.svd(A, full_matrices=False)
-    cond = s_vals[0] / s_vals[-1]
-    print(f"Condition number of design matrix: {cond:.4e}")
-    print(f"Smallest singular value: {s_vals[-1]:.4e}")
+    if solving_system_method == 'svd':
+        # Solve the system using SVD
+        u_svd, s_vals, vh_svd = scipy.linalg.svd(A, full_matrices=False)
+        cond = s_vals[0] / s_vals[-1]
+        print(f"Condition number of design matrix: {cond:.4e}")
+        print(f"Smallest singular value: {s_vals[-1]:.4e}")
 
-    if cond > 1e12:
-        print("Warning: Design matrix is very ill-conditioned!")
+        if cond > 1e12:
+            print("Warning: Design matrix is very ill-conditioned!")
 
-    # Threshold for singular values to be considered "zero"
-    threshold = 1e-12 * s_vals[0]
+        # Threshold for singular values to be considered "zero"
+        threshold = 1e-12 * s_vals[0]
 
-    # Apply truncated SVD solution
-    s_inv = np.zeros_like(s_vals)
-    s_inv[s_vals > threshold] = 1.0 / s_vals[s_vals > threshold]
+        # Apply truncated SVD solution
+        s_inv = np.zeros_like(s_vals)
+        s_inv[s_vals > threshold] = 1.0 / s_vals[s_vals > threshold]
 
-    # Compute solution
-    x = vh_svd.T @ (s_inv * (u_svd.T @ y))
+        # Compute solution
+        x = vh_svd.T @ (s_inv * (u_svd.T @ y))
+    elif solving_system_method == 'lsa':
+        # Solve the system using Least Squares Adjustment with regularization
+        print("Solving system using Least Squares Adjustment...")
+
+        try:
+            # Method 1: Use numpy's least squares solver
+            x, residuals, rank, s_vals = np.linalg.lstsq(A, y, rcond=None)
+
+            # Calculate condition number
+            cond = s_vals[0] / s_vals[-1] if len(s_vals) > 1 else float('inf')
+            print(f"Condition number of design matrix: {cond:.4e}")
+            print(f"Rank of design matrix: {rank} (out of {A.shape[1]} columns)")
+
+            threshold = 1e-12 * s_vals[0]
+
+            # Check solution quality
+            if cond > 1e12:
+                print("Warning: Design matrix is very ill-conditioned!")
+
+            # Alternatively, we can use scipy's lsqr solver for large sparse systems
+            if A.shape[0] > 10000 or cond > 1e10:
+                print("Using LSQR for better numerical stability...")
+                x_lsqr = scipy.sparse.linalg.lsqr(A, y, atol=1e-8, btol=1e-8)
+                x = x_lsqr[0]  # Extract solution vector
+                print(f"LSQR converged with reason: {x_lsqr[1]}, iterations: {x_lsqr[2]}")
+
+        except np.linalg.LinAlgError as e:
+            # Fallback to more robust solver if standard LSA fails
+            print(f"LSA failed with error: {e}. Falling back to robust solver.")
+
+            # Use scipy's LSMR solver which is more robust to ill-conditioning
+            x = scipy.sparse.linalg.lsmr(A, y, atol=1e-8, btol=1e-8)[0]
+
+            # Since we don't have singular values anymore, estimate condition number
+            AT_A = A.T @ A
+            eigvals = scipy.linalg.eigvalsh(AT_A)
+            cond = np.sqrt(eigvals.max() / eigvals.min())
+            print(f"Estimated condition number: {cond:.4e}")
 
     # Calculate residuals
     residuals = y - A @ x
@@ -301,49 +361,121 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
 
     # Calculate formal errors if requested
     if calculate_errors:
-        try:
-            # Compute variance factor
-            sigma_0_squared = residual_norm ** 2 / (3 * n_sites - len(x))
-            print(f"Estimated error variance factor: {sigma_0_squared:.8f}")
+        if solving_system_method == 'svd':
+            try:
+                # Compute variance factor
+                sigma_0_squared = residual_norm ** 2 / (3 * n_sites - len(x))
+                print(f"Estimated error variance factor: {sigma_0_squared:.8f}")
 
-            # Calculate covariance matrix using SVD components
-            V_truncated = vh_svd.T[:, s_vals > threshold]
-            s_inv_squared = s_inv[s_vals > threshold] ** 2
-            cov_matrix = V_truncated @ np.diag(s_inv_squared) @ V_truncated.T * sigma_0_squared
+                # Calculate covariance matrix using SVD components
+                V_truncated = vh_svd.T[:, s_vals > threshold]
+                s_inv_squared = s_inv[s_vals > threshold] ** 2
+                cov_matrix = V_truncated @ np.diag(s_inv_squared) @ V_truncated.T * sigma_0_squared
 
-            coefficient_errors = np.sqrt(np.diag(cov_matrix))
+                coefficient_errors = np.sqrt(np.diag(cov_matrix))
 
-            # Initialize error arrays
-            error_array = np.zeros_like(coeffs_array)
+                # Initialize error arrays
+                error_array = np.zeros_like(coeffs_array)
 
-            # Fill in error arrays
-            for (n, m), idx in [(key[:2], val) for key, val in coeff_idx.items() if key[2] == 'C']:
-                error_array[0, n, m] = coefficient_errors[idx]
+                # Fill in error arrays
+                for (n, m), idx in [(key[:2], val) for key, val in coeff_idx.items() if key[2] == 'C']:
+                    error_array[0, n, m] = coefficient_errors[idx]
 
-            for (n, m), idx in [(key[:2], val) for key, val in coeff_idx.items() if key[2] == 'S']:
-                error_array[1, n, m] = coefficient_errors[idx]
+                for (n, m), idx in [(key[:2], val) for key, val in coeff_idx.items() if key[2] == 'S']:
+                    error_array[1, n, m] = coefficient_errors[idx]
 
-            # Signal-to-noise ratio for load coefficients
-            snr_load = np.zeros_like(coeffs_array)
-            mask = error_array > 0
-            snr_load[mask] = np.abs(coeffs_array[mask]) / error_array[mask]
+                # Signal-to-noise ratio for load coefficients
+                snr_load = np.zeros_like(coeffs_array)
+                mask = error_array > 0
+                snr_load[mask] = np.abs(coeffs_array[mask]) / error_array[mask]
 
-            result.update({
-                'load_errors': error_array,
-                'load_snr': snr_load,
-                'covariance_matrix': cov_matrix,
-                'sigma_0_squared': sigma_0_squared
-            })
+                result.update({
+                    'load_errors': error_array,
+                    'load_snr': snr_load,
+                    'covariance_matrix': cov_matrix,
+                    'sigma_0_squared': sigma_0_squared
+                })
 
-            print("Computed formal errors for load coefficients")
-        except Exception as e:
-            print(f"Warning: Could not compute formal errors for load coefficients: {e}")
+                print("Computed formal errors for load coefficients")
+            except Exception as e:
+                print(f"Warning: Could not compute formal errors for load coefficients: {e}")
+        elif solving_system_method == 'lsa':
+            # Calculate formal errors if requested
+            try:
+                # Compute variance factor
+                sigma_0_squared = residual_norm ** 2 / (3 * n_sites - len(x))
+                print(f"Estimated error variance factor: {sigma_0_squared:.8f}")
+
+                # Use eigenvalue decomposition approach by default - more stable for all cases
+                print("Computing covariance matrix using stable eigenvalue decomposition...")
+
+                # Compute A^T A
+                AT_A = A.T @ A
+
+                # Use eigenvalue decomposition
+                eigvals, eigvecs = scipy.linalg.eigh(AT_A)
+
+                # Filter small eigenvalues (regularization)
+                max_eigval = eigvals.max()
+                min_eigval = max_eigval * 1e-10  # Adjust threshold as needed
+                mask = eigvals > min_eigval
+
+                print(f"Using {np.sum(mask)} of {len(eigvals)} eigenvalues (threshold: {min_eigval:.3e})")
+
+                filtered_eigvals = eigvals[mask]
+                filtered_eigvecs = eigvecs[:, mask]
+
+                # Construct pseudoinverse using filtered eigendecomposition
+                Qxx = filtered_eigvecs @ np.diag(1.0 / filtered_eigvals) @ filtered_eigvecs.T
+
+                # Covariance matrix = sigma_0^2 * Qxx
+                cov_matrix = sigma_0_squared * Qxx
+
+                # Extract standard errors from diagonal of covariance matrix
+                coefficient_errors = np.sqrt(np.diag(cov_matrix))
+
+                # Check for NaN or inf values
+                if np.any(np.isnan(coefficient_errors)) or np.any(np.isinf(coefficient_errors)):
+                    print("Warning: NaN or Inf values detected in error estimates.")
+                    # Replace NaN/Inf with large but finite values
+                    bad_mask = np.isnan(coefficient_errors) | np.isinf(coefficient_errors)
+                    coefficient_errors[bad_mask] = 1.0  # Set to a large value relative to coefficients
+
+                # Initialize error arrays
+                error_array = np.zeros_like(coeffs_array)
+
+                # Fill in error arrays
+                for (n, m), idx in [(key[:2], val) for key, val in coeff_idx.items() if key[2] == 'C']:
+                    error_array[0, n, m] = coefficient_errors[idx]
+
+                for (n, m), idx in [(key[:2], val) for key, val in coeff_idx.items() if key[2] == 'S']:
+                    error_array[1, n, m] = coefficient_errors[idx]
+
+                # Signal-to-noise ratio for load coefficients
+                snr_load = np.zeros_like(coeffs_array)
+                mask = error_array > 0
+                snr_load[mask] = np.abs(coeffs_array[mask]) / error_array[mask]
+
+                result.update({
+                    'load_errors': error_array,
+                    'load_snr': snr_load,
+                    'covariance_matrix': cov_matrix,
+                    'sigma_0_squared': sigma_0_squared
+                })
+
+                print("Computed formal errors for load coefficients")
+            except Exception as e:
+                print(f"Warning: Could not compute formal errors for load coefficients: {e}")
+                import traceback
+                traceback.print_exc()
 
     # Print the key coefficients
-    print("\nEstimated Key Coefficients:")
+    print("\nEstimated Key Coefficients (SLD: kg/m**2):")
+    print(f"C10 = {coeffs_array[0, 1, 0]:.8e}")
     print(f"C20 = {coeffs_array[0, 2, 0]:.8e}")
     print(f"C21 = {coeffs_array[0, 2, 1]:.8e}, S21 = {coeffs_array[1, 2, 1]:.8e}")
     print(f"C22 = {coeffs_array[0, 2, 2]:.8e}, S22 = {coeffs_array[1, 2, 2]:.8e}")
+    print(f"C30 = {coeffs_array[0, 3, 0]:.8e}")
 
     return result
 def calculate_potential_coefficients(load_coeffs, love_numbers_file=None, error_info=None, reference_frame="CF"):
@@ -398,6 +530,7 @@ def calculate_potential_coefficients(load_coeffs, love_numbers_file=None, error_
         # Factor from Wahr et al. (1998) and papers, scaled by rho_w
         # The factor 3.0/(rho_E * R_E) includes the normalization and unit conversion
         factor = 3.0 / (rho_E * R_E) * (1.0 + k_n) / (2.0 * n + 1.0)
+        # factor = (1.0 + k_n) / (2.0 * n + 1.0)
         # factor = (1+k_n) * (3*rho_w)/(rho_E*(2*n+1)) * (R_E/M_E)
         potential_array[:, n, :] = factor * load_coeffs.coeffs[:, n, :]
 
@@ -618,7 +751,7 @@ def transform_love_numbers(love_numbers, reference_frame="CE"):
         # Center of surface figure (no-net translation)
         transformed['h_n'][1] = (2.0 / 3.0) * (h1_CE - l1_CE)
         transformed['l_n'][1] = -(1.0 / 3.0) * (h1_CE - l1_CE)
-        transformed['k_n'][1] = -(1.0 / 3.0) * h1_CE -(2.0 / 3.0) * l1_CE
+        transformed['k_n'][1] = k1_CE - (1.0 / 3.0) * h1_CE - (2.0 / 3.0) * l1_CE
 
     else:
         raise ValueError(f"Unknown reference frame: {reference_frame}. "

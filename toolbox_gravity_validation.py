@@ -7,6 +7,7 @@ import scipy.special
 from pyshtools import SHCoeffs
 import datetime
 
+
 def calculate_displacements_from_coefficients(coeffs, site_locations,
                                               love_numbers_file=None,
                                               reference_frame="CF"):
@@ -36,7 +37,8 @@ def calculate_displacements_from_coefficients(coeffs, site_locations,
 
     # Constants
     R_E = 6371000.0  # Earth radius in meters
-    rho_E = 5517.0   # Average Earth density (kg/m³)
+    rho_E = 5517.0  # Average Earth density (kg/m³)
+    M_E = 5.972e24
 
     # Extract coefficient array
     if isinstance(coeffs, dict) and 'load_coefficients' in coeffs:
@@ -85,22 +87,27 @@ def calculate_displacements_from_coefficients(coeffs, site_locations,
         z = np.clip(np.cos(phi_i), -1 + 1e-10, 1 - 1e-10)  # Clipped for stability
 
         for n in range(1, max_degree + 1):
+            # Use lpmn but with log-based normalization for stability
             Pnm, dPnm = scipy.special.lpmn(n, n, z)
 
             for m in range(0, n + 1):
                 P = Pnm[m, n]
                 dP = dPnm[m, n]
 
-                # Full 4π normalization
-                if m == 0:
-                    norm = np.sqrt(2 * n + 1)
-                else:
-                    norm = np.sqrt(2 * (2 * n + 1) *
-                                   scipy.special.factorial(n - m) /
-                                   scipy.special.factorial(n + m))
+                # Full 4π normalization with log-based calculation
+                if 1:
+                    if m == 0:
+                        norm_factor = np.sqrt(2 * n + 1)
+                    else:
+                        # More stable calculation using log factorials
+                        log_norm = 0.5 * (np.log(2) + np.log(2 * n + 1) +
+                                          scipy.special.gammaln(n - m + 1) -
+                                          scipy.special.gammaln(n + m + 1))
+                        norm_factor = np.exp(log_norm)
 
-                P_norm = P * norm
-                dP_dz_norm = dP * norm
+                    P_norm = P * norm_factor
+                    dP_dz_norm = dP * norm_factor
+
                 dP_dphi = -sin_phi_i * dP_dz_norm
 
                 cos_m_lam = np.cos(m * lam_i)
@@ -112,20 +119,20 @@ def calculate_displacements_from_coefficients(coeffs, site_locations,
                 factor = (rho_E / 3.0) * ((2 * n + 1) / (1.0 + k_n[n]))
 
                 # NORTH
-                north_factor = (l_n[n] * factor * dP_dphi) / R_E
+                north_factor = -factor * l_n[n] * dP_dphi / R_E
                 north[i] += north_factor * C * cos_m_lam
                 if m > 0:
                     north[i] += north_factor * S * sin_m_lam
 
                 # EAST
                 if abs(cos_phi_i) > 1e-10:
-                    east_factor = (l_n[n] * factor * m * P_norm / cos_phi_i) / R_E
+                    east_factor = -factor * l_n[n] * (m / cos_phi_i) * P_norm / R_E
                     east[i] += -east_factor * C * sin_m_lam
                     if m > 0:
                         east[i] += east_factor * S * cos_m_lam
 
                 # VERTICAL
-                up_factor = (h_n[n] * factor * P_norm) / R_E
+                up_factor = factor * h_n[n] * P_norm / R_E
                 up[i] += up_factor * C * cos_m_lam
                 if m > 0:
                     up[i] += up_factor * S * sin_m_lam

@@ -244,7 +244,7 @@ def main():
                         help='Path to Love numbers file')
     parser.add_argument('--output', type=str, default=f'OUTPUT_NEW/{default_solution}',
                         help='Directory to save output files')
-    parser.add_argument('--max-degree', type=int, default=6,
+    parser.add_argument('--max-degree', type=int, default=20,
                         help='Maximum spherical harmonic degree')
     parser.add_argument('--frame', type=str, default='CF',
                         help='Displacement frame')
@@ -277,6 +277,8 @@ def main():
 
     if args.regularization:
         args.output += '_REG'
+
+    args.output += '_TEST'
 
     output = os.path.join(args.output, os.path.basename(args.input).split('.')[0])
     # Create output directory
