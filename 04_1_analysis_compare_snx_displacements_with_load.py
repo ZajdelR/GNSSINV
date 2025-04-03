@@ -710,6 +710,8 @@ def process_station(sta, sampling, solution, include_components, compare_with):
     df_common = df_red.loc[common_dates]
     comp_common = compare_df.loc[common_dates]
 
+    # duplicated_rows = df_common[df_common.index.duplicated(keep=False)]
+    df_common = df_common[~df_common.index.duplicated(keep='first')]
     # Calculate statistics
     stats = calculate_statistics(df_common, comp_common, common_dates)
     differences_dU = stats['differences']
@@ -775,7 +777,6 @@ def process_station(sta, sampling, solution, include_components, compare_with):
 
     return comparison_data
 
-
 def find_stations(solution, sampling):
     """
     Find all stations available in the data directory.
@@ -812,17 +813,18 @@ def main():
     # Parameters to customize analysis
     sampling = '01D'
     solution = 'IGS1R03SNX'
+    # solution = 'ITRF2020-IGS-RES'
 
     # Select which components to include in the sum (set to True or False)
     include_components = {
-        'A': True,  # Atmospheric loading
-        'O': True,  # Ocean loading
-        'S': True,  # Surface water loading
+        'A': False,  # Atmospheric loading
+        'O': False,  # Ocean loading
+        'S': False,  # Surface water loading
         'H': False
     }
 
     # Select which component to compare with (one of 'A', 'H', 'O', 'S')
-    compare_with = 'H'  # H is Hydrological loading
+    compare_with = 'A'  # H is Hydrological loading
 
     # Check if specific stations are provided as command line arguments
     if len(sys.argv) > 1:
@@ -836,9 +838,10 @@ def main():
     # Process each station
     results = {}
     for sta in stations:
-        result = process_station(sta, sampling, solution, include_components, compare_with)
-        if result is not None:
-            results[sta] = result
+        if sta == 'ARTU':
+            result = process_station(sta, sampling, solution, include_components, compare_with)
+            if result is not None:
+                results[sta] = result
 
     print(f"\nSuccessfully processed {len(results)} out of {len(stations)} stations.")
 
