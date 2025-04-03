@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import matplotlib
-from gfzload2pkl_tools import combine_selected_files
+from toolbox_gfzload2pkl import combine_selected_files
 import os
 import scipy.stats as stats
 from matplotlib.ticker import MaxNLocator
@@ -34,7 +34,7 @@ def load_station_data(sta, sampling, solution):
         DataFrame containing the displacement data, or None if file not found
     """
     try:
-        file_path = f'INPUT_CRD/{solution}_{sampling}/CODE/{solution}_{sta}_{sampling}_DISP.PKL'
+        file_path = f'DATA/DISPLACEMENTS/{solution}_{sampling}/CODE/{solution}_{sta}_{sampling}_DISP.PKL'
         df = pd.read_pickle(file_path)
         df = df.reset_index(level='EPOCH')[['EPOCH', 'dU', 'dN', 'dE']].set_index('EPOCH')
         return df
@@ -63,7 +63,7 @@ def load_component_data(sta, component):
         DataFrame containing the component data, or None if file not found
     """
     try:
-        file_path = f'SOLUTION_PICKLES_GFZ_IGS1R03/{sta}_{component}_cf.PKL'
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_{component}_cf.PKL'
         df = pd.read_pickle(file_path)
         df = df.rename({'R': 'dU', 'NS': 'dN', 'EW': 'dE'}, axis=1)
         return df
@@ -616,8 +616,9 @@ def process_station(sta, sampling, solution, include_components, compare_with):
     print(f"\nProcessing station: {sta}")
 
     # Create output directory if it doesn't exist
-    output_dir = f'INPUT_CRD/{solution}_{sampling}/COMP/'
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}'
+    os.makedirs(os.path.join(output_dir,'PKL'), exist_ok=True)
+    os.makedirs(os.path.join(output_dir, 'TS_COMP'), exist_ok=True)
 
     # Load main displacement data
     df = load_station_data(sta, sampling, solution)
@@ -634,25 +635,25 @@ def process_station(sta, sampling, solution, include_components, compare_with):
     files = []
 
     if include_components['A']:
-        file_path = f'SOLUTION_PICKLES_GFZ_IGS1R03/{sta}_A_cf.PKL'
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_A_cf.PKL'
         if os.path.exists(file_path):
             files.append(file_path)
             component_labels.append('A')
 
     if include_components['O']:
-        file_path = f'SOLUTION_PICKLES_GFZ_IGS1R03/{sta}_O_cf.PKL'
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_O_cf.PKL'
         if os.path.exists(file_path):
             files.append(file_path)
             component_labels.append('O')
 
     if include_components['S']:
-        file_path = f'SOLUTION_PICKLES_GFZ_IGS1R03/{sta}_S_cf.PKL'
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_S_cf.PKL'
         if os.path.exists(file_path):
             files.append(file_path)
             component_labels.append('S')
 
     if include_components['H']:
-        file_path = f'SOLUTION_PICKLES_GFZ_IGS1R03/{sta}_H_cf.PKL'
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_H_cf.PKL'
         if os.path.exists(file_path):
             files.append(file_path)
             component_labels.append('H')
@@ -741,12 +742,12 @@ def process_station(sta, sampling, solution, include_components, compare_with):
     }
 
     # Create filename based on what's being compared
-    output_file = os.path.join(output_dir, f'{solution}_{sta}_WO-{sum_components_name}_VS_{compare_with}.PKL')
+    output_file = os.path.join(output_dir, 'PKL', f'{solution}_{sta}_WO-{sum_components_name}_VS_{compare_with}.PKL')
     pd.to_pickle(comparison_data, output_file)
     print(f"Comparison data saved to {output_file}")
 
     # Save the figure as PNG as well
-    fig_output = os.path.join(output_dir, f'{solution}_{sta}_{sampling}_WO-{sum_components_name}_VS_{compare_with}.png')
+    fig_output = os.path.join(output_dir, 'TS_COMP', f'{solution}_{sta}_{sampling}_WO-{sum_components_name}_VS_{compare_with}.png')
     plt.savefig(fig_output, dpi=200, bbox_inches='tight')
     print(f"Figure saved to {fig_output}")
 
@@ -791,7 +792,7 @@ def find_stations(solution, sampling):
     list
         List of station names
     """
-    pattern = f'INPUT_CRD/{solution}_{sampling}/CODE/{solution}_*_{sampling}_DISP.PKL'
+    pattern = f'DATA/DISPLACEMENTS/{solution}_{sampling}/CODE/{solution}_*_{sampling}_DISP.PKL'
     files = glob.glob(pattern)
 
     stations = []
@@ -814,9 +815,9 @@ def main():
 
     # Select which components to include in the sum (set to True or False)
     include_components = {
-        'A': False,  # Atmospheric loading
-        'O': False,  # Ocean loading
-        'S': False,  # Surface water loading
+        'A': True,  # Atmospheric loading
+        'O': True,  # Ocean loading
+        'S': True,  # Surface water loading
         'H': False
     }
 
@@ -841,7 +842,7 @@ def main():
 
     print(f"\nSuccessfully processed {len(results)} out of {len(stations)} stations.")
 
-    out_path = rf"INPUT_CRD/{solution}_{sampling}/COMP'"
+    out_path = rf"OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL"
     os.makedirs(out_path,exist_ok=True)
 
     # Optionally create a summary of all stations

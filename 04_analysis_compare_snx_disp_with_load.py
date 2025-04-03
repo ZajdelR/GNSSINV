@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import matplotlib
-from gfzload2pkl_tools import combine_selected_files
+from toolbox_gfzload2pkl import combine_selected_files
 import os
 import scipy.stats as stats
 from matplotlib.ticker import MaxNLocator

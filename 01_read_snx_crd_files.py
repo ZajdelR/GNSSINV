@@ -1,6 +1,6 @@
 import logging
 import os
-import gfzload2snx_tools as gfztl
+import toolbox_gfzload2snx as gfztl
 from geodezyx import conv
 import pandas as pd
 import numpy as np

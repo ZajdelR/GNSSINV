@@ -136,7 +136,7 @@ def visualize_variance_explained_map(comp_dir, output_dir=None, pattern='*_WO-*_
                                      min_h_std=0.0,
                                      figsize=(14, 10), dpi=300, cmap='viridis'):
     if output_dir is None:
-        output_dir = os.path.join(comp_dir, "MAPS")
+        output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS")
 
     compiled_data, sum_components, compare_with, solution = load_station_results(comp_dir, pattern=pattern)
 
@@ -154,7 +154,7 @@ def visualize_variance_explained_map(comp_dir, output_dir=None, pattern='*_WO-*_
     print(f"Excluded {len(filtered_out_stations)} stations")
 
     try:
-        station_coords = pd.read_pickle('DATA/ALL_STATIONS_LATLON.PKL')
+        station_coords = pd.read_pickle('EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.PKL')
         print(f"Loaded coordinates for {len(station_coords)} stations")
         print(f"Coordinate columns: {station_coords.columns.tolist()}")
     except Exception as e:
@@ -320,7 +320,7 @@ def create_variance_ratio_map(comp_dir, output_dir=None, pattern='*_WO-*_VS_*.PK
         return None, None
 
     try:
-        station_coords = pd.read_pickle('DATA/ALL_STATIONS_LATLON.PKL')
+        station_coords = pd.read_pickle('EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.PKL')
     except Exception as e:
         print(f"Error loading station coordinates: {str(e)}")
         return None, None
@@ -473,7 +473,7 @@ def create_correlation_map(comp_dir, value_to_plot, output_dir=None, pattern='*_
         return None, None
 
     try:
-        station_coords = pd.read_pickle('DATA/ALL_STATIONS_LATLON.PKL')
+        station_coords = pd.read_pickle('EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.PKL')
     except Exception as e:
         print(f"Error loading station coordinates: {str(e)}")
         return None, None
@@ -662,41 +662,42 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
 if __name__ == "__main__":
     solution = 'IGS1R03SNX'
     sampling = '01D'
-    reduction = 'AOS'
+    reduction = 'None'
+    vs = 'A'
 
     # Example usage with default directory
-    comp_dir = f'INPUT_CRD/{solution}_{sampling}/COMP/'
-    output_dir = os.path.join(comp_dir, "MAPS")
+    comp_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL'
+    output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS")
     min_num_points = 1000
     min_h_std = 1.5  # 1.5 mm minimum standard deviation for H component
-    pattern = f'*_WO-{reduction}_VS_*.PKL'
+    pattern = f'*_WO-{reduction}_VS_{vs}*.PKL'
 
     print(f"Using parameters: min_num_points={min_num_points}, min_h_std={min_h_std}")
     print(f"Pattern: {pattern}")
     print(f"Output directory: {output_dir}")
 
     # Create the variance explained map
-    # fig1, plot_df1 = visualize_variance_explained_map(comp_dir, output_dir, pattern, min_num_points, min_h_std, cmap='Greens')
+    fig1, plot_df1 = visualize_variance_explained_map(comp_dir, output_dir, pattern, min_num_points, min_h_std, cmap='Greens')
 
     # Create the variance ratio map
-    # fig2, plot_df2 = create_variance_ratio_map(comp_dir, output_dir, pattern, min_num_points, min_h_std)
+    fig2, plot_df2 = create_variance_ratio_map(comp_dir, output_dir, pattern, min_num_points, min_h_std)
 
     # Create the correlation map
-    # fig3, plot_df3 = create_correlation_map(comp_dir, 'correlation', output_dir, pattern, min_num_points, min_h_std, cmap='coolwarm')
+    fig3, plot_df3 = create_correlation_map(comp_dir, 'correlation', output_dir, pattern, min_num_points, min_h_std, cmap='coolwarm')
     fig3a, plot_df3a = create_correlation_map(comp_dir, 'kge2012', output_dir, pattern, min_num_points, min_h_std, cmap='coolwarm')
 
     # Determine sum_components, compare_with, solution from the data
-    # compiled_data, sum_components, compare_with, solution = load_station_results(comp_dir, pattern)
+    compiled_data, sum_components, compare_with, solution = load_station_results(comp_dir, pattern)
     #
     # # Create bar plot for top stations with highest variance explained
-    # fig4 = create_top_stations_bar_plot(plot_df1, metric='variance_explained', top_percent=10,
-    #                                     output_dir=output_dir, solution=solution,
-    #                                     sum_components=sum_components, compare_with=compare_with)
-    #
+    fig4 = create_top_stations_bar_plot(plot_df1, metric='variance_explained', top_percent=10,
+                                        output_dir=output_dir, solution=solution,
+                                        sum_components=sum_components, compare_with=compare_with)
+
     # # Create bar plot for top stations with highest correlation
-    # fig5 = create_top_stations_bar_plot(plot_df3, metric='correlation', top_percent=10,
-    #                                     output_dir=output_dir, solution=solution,
-    #                                     sum_components=sum_components, compare_with=compare_with)
+    fig5 = create_top_stations_bar_plot(plot_df3, metric='correlation', top_percent=10,
+                                        output_dir=output_dir, solution=solution,
+                                        sum_components=sum_components, compare_with=compare_with)
 
     # Show the plots
     plt.close('all')
