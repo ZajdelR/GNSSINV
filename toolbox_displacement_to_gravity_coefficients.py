@@ -156,7 +156,7 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
             dP_nm_dz = dP[m, n]
 
             if 0:
-                # Convert to fully normalized Legendre functions (4π normalization)
+                # Convert to fully normalized Legendre functions (4π normalization) Method 1
                 if m == 0:
                     norm_factor = np.sqrt((2 * n + 1))
                 else:
@@ -168,7 +168,7 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
                 P_nm_norm = P_nm * norm_factor
                 dP_nm_dz_norm = dP_nm_dz * norm_factor
             if 1:
-                # Convert to fully normalized Legendre functions (4π normalization)
+                # Convert to fully normalized Legendre functions (4π normalization) Method 2
                 if m == 0:
                     norm_factor = np.sqrt((2 * n + 1))
                 else:
