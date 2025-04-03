@@ -662,7 +662,7 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
 if __name__ == "__main__":
     solution = 'IGS1R03SNX'
     sampling = '01D'
-    reduction = 'None'
+    reduction = 'H'
     vs = 'A'
 
     # Example usage with default directory
