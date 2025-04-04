@@ -226,7 +226,8 @@ def main():
     default_solution = ''
     # default_solution = 'ESMGFZ_H_cf_GRIDS'
     # default_solution = 'ESMGFZ_H_cf_IGSNET'
-    default_solution = 'IGS1R03SNX_01D'
+    # default_solution = 'IGS1R03SNX_01D'
+    default_solution = 'ITRF2020-IGS-RES_01D'
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Process displacement data with error analysis')
@@ -244,12 +245,12 @@ def main():
                         help='Path to Love numbers file')
     parser.add_argument('--output', type=str, default=f'OUTPUT_NEW/{default_solution}',
                         help='Directory to save output files')
-    parser.add_argument('--max-degree', type=int, default=20,
+    parser.add_argument('--max-degree', type=int, default=7,
                         help='Maximum spherical harmonic degree')
     parser.add_argument('--frame', type=str, default='CF',
                         help='Displacement frame')
-    parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD)', default='20180101')
-    parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD)', default='20180101')
+    parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD)', default='20180102')
+    parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD)', default='20180102')
     parser.add_argument('--limit_stations', action='store_true', default=False,
                         help='Use only datum stations')
     parser.add_argument('--only_datum', action='store_true', default=False,

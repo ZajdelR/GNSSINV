@@ -660,10 +660,10 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
 
 # Example usage
 if __name__ == "__main__":
-    solution = 'IGS1R03SNX'
+    solution = 'ITRF2020-IGS-RES'
     sampling = '01D'
-    reduction = 'H'
-    vs = 'A'
+    reduction = 'AOS'
+    vs = 'H'
 
     # Example usage with default directory
     comp_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL'
