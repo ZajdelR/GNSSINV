@@ -166,15 +166,15 @@ def convert_nc_to_daily_df(source_dir, model, model_outputname, year, frame, out
 # Example usage (directly in the script)
 if __name__ == "__main__":
     # Configuration
-    SOURCE_DIR = r"D:\from_Kyriakos\PROCESSING\ESMGFZLOAD_GRID"  # Replace with your source directory
+    SOURCE_DIR = r"D:\from_Kyriakos\PROCESSING\ESMGFZLOAD_GRID\LSDM"  # Replace with your source directory
     MODEL = "ESMGFZ_HYDL"  # Replace with your model name
-    YEAR = "2018"  # Replace with desired year
     FRAME = "CF"  # Replace with desired reference frame
-    MODEL_OUTPUTNAME = f'{MODEL.split('_')[0]}_{MODEL.split('_')[1][0]}_{FRAME.lower()}'
+    # MODEL_OUTPUTNAME = f'{MODEL.split('_')[0]}_{MODEL.split('_')[1][0]}_{FRAME.lower()}'
+    MODEL_OUTPUTNAME = f'{MODEL.split('_')[0]}_LSDM_{FRAME.lower()}'
     OUTPUT_RESOLUTION = 7.5
     OUTPUT_DIR = f"DATA/DISPLACEMENTS/{MODEL_OUTPUTNAME}_GRIDS/TIME/"  # Replace with your output directory
 
-    for YEAR in range(2000, 2023):
+    for YEAR in range(2015, 2023):
         # Call the function
         output_files = convert_nc_to_daily_df(
             source_dir=SOURCE_DIR,
@@ -185,6 +185,6 @@ if __name__ == "__main__":
             output_resolution=OUTPUT_RESOLUTION,
             output_dir=OUTPUT_DIR
         )
-        break
+        # break
 
     print(f"Conversion complete. Created {len(output_files)} daily files.")

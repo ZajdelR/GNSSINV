@@ -22,6 +22,7 @@ from toolbox_gravity_validation import (
     plot_residual_map,
     plot_displacement_comparison_map,
     plot_vector_displacement_map,
+    plot_station_weights,
     plot_displacement_components,
     analyze_temporal_evolution
 )
@@ -34,7 +35,8 @@ def process_date(date, df, lat_lon, love_number_file,
                  print_maps=False,
                  regularization=False,
                  add_helmert=False,
-                 reduce_components=None):
+                 reduce_components=None,
+                 use_vce=False):
     """
     Process a single date from the dataset.
 
@@ -102,10 +104,9 @@ def process_date(date, df, lat_lon, love_number_file,
             love_numbers_file=love_number_file,
             calculate_errors=calculate_errors,
             reference_frame=frame,
-            output_dir=date_output_dir,
-            identifier=identifier,
             regularization=regularization,
-            add_helmert=add_helmert
+            add_helmert=add_helmert,
+            use_vce=use_vce
         )
 
         # Add reference frame to the result dictionary for inclusion in summary
@@ -131,6 +132,13 @@ def process_date(date, df, lat_lon, love_number_file,
         # Create specific validation directory
         validation_dir = os.path.join(date_output_dir, "validation")
         os.makedirs(validation_dir, exist_ok=True)
+
+        if use_vce:
+            plot_station_weights(displacements['lat'],
+                                 displacements['lon'],
+                                 coeffs['vce_weights'],
+                                 displacements['code'],
+                                 validation_dir+f'/{identifier}_vce.png')
 
         # Validate solution if not already done during coefficient computation
         if 'validation' not in coeffs:
@@ -522,14 +530,12 @@ def main():
     # default_solution = 'ESMGFZ_H_cf_GRIDS'
     # default_solution = 'ESMGFZ_H_cf_IGSNET'
     # default_solution = 'IGS1R03SNX_01D'
-    default_solution = 'ITRF2020-IGS-RES_01D'
+    # default_solution = 'ITRF2020-IGS-RES_01D'
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Process displacement data with error analysis')
     parser.add_argument('--solution', type=str, default=default_solution,
                         help='Path to station coordinates file')
-    parser.add_argument('--input', type=str, default=rf'INPUT_CRD/{default_solution}/TIME/',
-                        help='Path to input data file')
     parser.add_argument('--sampling', type=str, default='01D',
                         help='Path to station coordinates file')
     parser.add_argument('--latlon', type=str, default='EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.pkl',
@@ -539,8 +545,6 @@ def main():
                         help='Path to station coordinates file')
     parser.add_argument('--love', type=str, default=r'EXT/LLNs/ak135-LLNs-complete.dat',
                         help='Path to Love numbers file')
-    parser.add_argument('--output', type=str, default=f'OUTPUT_NEW/{default_solution}',
-                        help='Directory to save output files')
     parser.add_argument('--max-degree', type=int, default=7,
                         help='Maximum spherical harmonic degree')
     parser.add_argument('--frame', type=str, default='CF',
@@ -551,21 +555,23 @@ def main():
                         help='Use only datum stations')
     parser.add_argument('--only_datum', action='store_true', default=False,
                         help='Use only datum stations')
+    parser.add_argument('--use_vce', action='store_true', default=False,
+                        help='Use VCE for adding error information') ## Doesnt work
     parser.add_argument('--errors', action='store_true', default=True,
                         help='Calculate formal errors')
-    parser.add_argument('--printmaps', action='store_true', default=True,
+    parser.add_argument('--printmaps', action='store_true', default=False,
                         help='Print Maps')
     parser.add_argument('--regularization', action='store_true', default=False,
                         help='Use regularization')
 
     # Add arguments for component reduction
-    parser.add_argument('--reduce_A', action='store_true', default=False,
+    parser.add_argument('--reduce_A', action='store_true', default=0,
                         help='Reduce atmospheric loading component')
-    parser.add_argument('--reduce_O', action='store_true', default=False,
+    parser.add_argument('--reduce_O', action='store_true', default=0,
                         help='Reduce ocean loading component')
-    parser.add_argument('--reduce_S', action='store_true', default=False,
+    parser.add_argument('--reduce_S', action='store_true', default=0,
                         help='Reduce surface water loading component')
-    parser.add_argument('--reduce_H', action='store_true', default=True,
+    parser.add_argument('--reduce_H', action='store_true', default=0,
                         help='Reduce hydrological loading component')
 
     args = parser.parse_args()
@@ -609,7 +615,7 @@ def main():
         if component_str:
             args.output += f'_WO-{component_str}'
 
-    args.output += '_TEST'
+    # args.output += '_TEST'
 
     output = os.path.join(args.output, os.path.basename(args.input).split('.')[0])
     # Create output directory
@@ -690,7 +696,8 @@ def main():
                 print_maps=args.printmaps,
                 regularization=args.regularization,
                 add_helmert=False,
-                reduce_components=reduce_components,  # Add the component reduction parameter
+                reduce_components=reduce_components,
+                use_vce=args.use_vce
             )
 
             if coeffs is not None:

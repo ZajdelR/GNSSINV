@@ -60,10 +60,287 @@ def add_translation_rotation_parameters(A, n_sites, lats, lons):
     return A_extended
 
 
+def variance_component_estimation(A, y, n_sites, station_indices, max_iterations=10,
+                                  convergence_threshold=0.01, initial_weight=1.0,
+                                  regularization=None, min_scale=1e-10,
+                                  component_groups=False, station_groups=True):
+    """
+    Estimate variance components for different observation groups using iterative approach.
+
+    Parameters
+    ----------
+    A : ndarray
+        Design matrix
+    y : ndarray
+        Observation vector
+    n_sites : int
+        Number of observation sites
+    station_indices : array-like
+        Indices corresponding to each station (to group observations by station)
+    max_iterations : int, optional
+        Maximum number of iterations
+    convergence_threshold : float, optional
+        Threshold for relative change in variance components
+    initial_weight : float, optional
+        Initial weight for all stations
+    regularization : float, optional
+        Regularization parameter for the normal matrix
+    min_scale : float, optional
+        Minimum scaling factor to prevent numerical issues
+    component_groups : bool, optional
+        Whether to group by components (north, east, up)
+    station_groups : bool, optional
+        Whether to group by individual stations
+
+    Returns
+    -------
+    dict
+        Estimated variance components (weights) for each group
+    dict
+        Information about the convergence process
+    """
+    n_obs = A.shape[0]
+    n_params = A.shape[1]
+
+    # Define observation groups based on user preferences
+    groups = {}
+    unique_stations = np.unique(station_indices)
+    n_stations = len(unique_stations)
+
+    if component_groups:
+        # Add component groups
+        groups['north'] = np.zeros(n_obs, dtype=bool)
+        groups['east'] = np.zeros(n_obs, dtype=bool)
+        groups['up'] = np.zeros(n_obs, dtype=bool)
+
+        # Set component masks
+        groups['north'][:n_sites] = True
+        groups['east'][n_sites:2 * n_sites] = True
+        groups['up'][2 * n_sites:3 * n_sites] = True
+
+    if station_groups:
+        # Add station-specific groups
+        for station_id in unique_stations:
+            # Create masks for all three components of this station
+            station_mask = np.zeros(n_obs, dtype=bool)
+
+            # Find indices where this station appears in each component
+            north_idx = np.where(station_indices == station_id)[0]
+            east_idx = north_idx + n_sites
+            up_idx = north_idx + 2 * n_sites
+
+            # Combine all components for this station
+            for idx in np.concatenate([north_idx, east_idx, up_idx]):
+                if idx < n_obs:  # Safety check
+                    station_mask[idx] = True
+
+            # Add to groups dictionary
+            groups[f'station_{station_id}'] = station_mask
+
+    # Verify masks
+    # for group, mask in groups.items():
+    #     mask_sum = np.sum(mask)
+    #     # if mask_sum == 0:
+    #     #     print(f"Warning: Group '{group}' has no observations")
+    #     # else:
+    #     #     print(f"Group '{group}' has {mask_sum} observations")
+
+    # Initialize weights
+    weights = {group: initial_weight for group in groups}
+
+    # Initialize weight matrix
+    W = np.ones(n_obs)  # Initial weight matrix (diagonal)
+
+    # Apply initial weights
+    for group, mask in groups.items():
+        W[mask] = weights[group]
+
+    # Iteration history
+    history = {
+        'iterations': [],
+        'weights': [],
+        'residual_norms': [],
+        'convergence': []
+    }
+
+    print(f"Starting variance component estimation with {len(groups)} groups...")
+
+    for iteration in range(max_iterations):
+        # Create weighted design matrix and observation vector
+        W_sqrt = np.sqrt(W)
+        A_weighted = A * W_sqrt[:, np.newaxis]
+        y_weighted = y * W_sqrt
+
+        # Solve the weighted normal equations
+        if regularization is not None:
+            # Add Tikhonov regularization
+            I = np.eye(n_params)
+            N = A_weighted.T @ A_weighted + regularization * I
+            ATy = A_weighted.T @ y_weighted
+        else:
+            N = A_weighted.T @ A_weighted
+            ATy = A_weighted.T @ y_weighted
+
+        # Solve using SVD for robustness
+        try:
+            u, s, vh = scipy.linalg.svd(N, full_matrices=False)
+
+            # Filter small singular values
+            threshold = s[0] * 1e-12
+            s_inv = np.zeros_like(s)
+            s_inv[s > threshold] = 1.0 / s[s > threshold]
+
+            # Compute solution
+            x = vh.T @ (s_inv * (u.T @ ATy))
+
+            # Update residuals
+            v = y - A @ x  # Unweighted residuals
+
+        except np.linalg.LinAlgError as e:
+            print(f"SVD failed at iteration {iteration}: {e}")
+            # Try direct solve as fallback
+            try:
+                x = np.linalg.solve(N, ATy)
+                v = y - A @ x
+            except:
+                print("Failed to solve system. Stopping VCE.")
+                break
+
+        # Compute redundancy numbers using a simplified approach for station-wise VCE
+        r = np.ones(n_obs)  # Initialize with ones
+
+        # For large problems, use approximation for redundancy components
+        if n_obs > 10000 or len(groups) > 50:  # Many stations or observations
+            # Simplified estimation of redundancy
+            dof = n_obs - n_params  # Total degrees of freedom
+            mean_redundancy = dof / n_obs  # Average redundancy per observation
+
+            # Assign mean redundancy to all observations
+            r = np.ones(n_obs) * mean_redundancy
+
+            # Adjust by residual magnitude
+            v_norm = np.abs(v) / np.max(np.abs(v)) if np.max(np.abs(v)) > 0 else np.ones_like(v)
+            r = r * (1 - 0.5 * v_norm)  # Observations with large residuals get lower redundancy
+        else:
+            try:
+                # Compute the diagonal of the hat matrix H = A(A^TWA)^(-1)A^TW
+                # Using efficient methods to avoid forming full matrices
+
+                # Compute Q = N⁻¹
+                Q = vh.T @ (np.outer(s_inv, s_inv) * vh)
+
+                # Calculate diagonal elements of H = AQA^T (weighted)
+                H_diag = np.zeros(n_obs)
+                for i in range(n_obs):
+                    ai = A[i]
+                    H_diag[i] = ai @ (Q @ ai) * W[i]
+
+                # Redundancy numbers: r = 1 - h_ii
+                r = 1 - H_diag
+
+                # Check for negative redundancies (numerical issues)
+                r = np.maximum(r, 0.01)  # Ensure minimum redundancy
+            except Exception as e:
+                print(f"Error computing redundancy numbers: {e}")
+                r = np.ones(n_obs) * (n_obs - n_params) / n_obs
+
+        # Calculate new variance components
+        new_weights = {}
+        relative_changes = []
+
+        for group, mask in groups.items():
+            group_size = np.sum(mask)
+            if group_size > 0:
+                # Weighted sum of squared residuals for this group
+                wvtv = np.sum(W[mask] * v[mask] ** 2)
+
+                # Sum of redundancy numbers for this group
+                r_sum = np.sum(r[mask])
+
+                if r_sum > 0.01 * group_size:  # Ensure reasonable redundancy sum
+                    # New variance component
+                    sigma2 = wvtv / r_sum
+                    new_weight = 1.0 / max(sigma2, min_scale)
+                else:
+                    # Low redundancy - be conservative with weight change
+                    new_weight = weights[group] * 0.9  # Slightly reduce weight
+
+                # Calculate relative change
+                if weights[group] > 0:
+                    rel_change = abs(new_weight - weights[group]) / weights[group]
+                    relative_changes.append(rel_change)
+                else:
+                    relative_changes.append(1.0)  # Large change if previous weight was zero
+
+                new_weights[group] = new_weight
+
+        # Update weights with damping to improve stability
+        damping = 0.5  # Damping factor to prevent oscillations
+        for group in weights.keys():
+            weights[group] = weights[group] * (1 - damping) + new_weights[group] * damping
+
+        # Update weight matrix
+        for group, mask in groups.items():
+            W[mask] = weights[group]
+
+        # Calculate convergence statistic
+        if relative_changes:
+            max_change = max(relative_changes)
+        else:
+            max_change = 0
+
+        # Store iteration history
+        history['iterations'].append(iteration + 1)
+        history['weights'].append(weights.copy())
+        history['residual_norms'].append(np.linalg.norm(v))
+        history['convergence'].append(max_change)
+
+        # Print progress (limiting output for many stations)
+        if len(groups) <= 5:
+            print(f"Iteration {iteration + 1}: Weights = {', '.join([f'{g}={w:.2e}' for g, w in weights.items()])}, "
+                  f"Max change = {max_change:.4f}")
+        else:
+            # Only show stats summary for large numbers of stations
+            weight_values = np.array(list(weights.values()))
+            print(f"Iteration {iteration + 1}: Weights min={np.min(weight_values):.2e}, "
+                  f"max={np.max(weight_values):.2e}, mean={np.mean(weight_values):.2e}, "
+                  f"Max change = {max_change:.4f}")
+
+            # Report most downweighted stations
+            sorted_weights = sorted(weights.items(), key=lambda x: x[1])
+            print(f"Most downweighted groups: {', '.join([f'{g}={w:.2e}' for g, w in sorted_weights[:5]])}")
+
+        # Check convergence
+        if max_change < convergence_threshold:
+            print(f"VCE converged after {iteration + 1} iterations")
+            break
+
+    # Normalize weights so that the maximum weight is 1.0
+    max_weight = max(weights.values())
+    if max_weight > 0:
+        normalized_weights = {group: weight / max_weight for group, weight in weights.items()}
+    else:
+        normalized_weights = weights
+
+    if len(groups) <= 10:
+        print(f"Final normalized weights: {', '.join([f'{g}={w:.2f}' for g, w in normalized_weights.items()])}")
+    else:
+        # Display summary statistics for large numbers of stations
+        weight_values = np.array(list(normalized_weights.values()))
+        print(f"Final normalized weights: min={np.min(weight_values):.2f}, "
+              f"max={np.max(weight_values):.2f}, mean={np.mean(weight_values):.2f}")
+
+        # Report most downweighted stations
+        sorted_weights = sorted(normalized_weights.items(), key=lambda x: x[1])
+        print(f"Most downweighted groups: {', '.join([f'{g}={w:.2f}' for g, w in sorted_weights[:10]])}")
+
+    return weights, normalized_weights, history
+
 def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=None, calculate_errors=False,
                                 reference_frame="CF", add_helmert=False, regularize=True,
                                 damping_factor=5e-3, degree_dependent=True, auto_dumping=False,
-                                solving_system_method ='svd'):
+                                solving_system_method ='svd', use_vce=True, vce_iterations=5,
+                                station_specific_vce=True):
     """
     Calculate load coefficients from site displacements using unified least squares adjustment.
 
@@ -75,6 +352,8 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
     rho_w = 1025.0  # Density of seawater (kg/m³)
     rho_E = 5517.0  # Average density of Earth (kg/m³)
     g = 9.80665  # Gravitational acceleration at Earth's surface (m/s²)
+
+    station_ids = np.array(displacements['code'])
 
     # Extract site data
     u_values = np.array(displacements['vertical'])  # Vertical displacement (Up)
@@ -96,6 +375,7 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
 
     # Number of sites
     n_sites = len(lats)
+    n_obs = n_sites * 3
 
     # List of all (n, m) pairs for the coefficients
     nm_pairs = []
@@ -237,6 +517,68 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
         A = add_translation_rotation_parameters(A, n_sites, lats, lons)
         print(f"Added 6 Helmert parameters: 3 translations, 3 rotations")
 
+    # Apply VCE if requested
+    if use_vce:
+        print("Applying Variance Component Estimation...")
+
+        # Run VCE with station-specific or component grouping
+        weights, normalized_weights, vce_history = variance_component_estimation(
+            A, y, n_sites, station_ids,
+            max_iterations=vce_iterations,
+            initial_weight=1.0,
+            regularization=damping_factor if regularize else None,
+            component_groups=not station_specific_vce,
+            station_groups=station_specific_vce
+        )
+
+        # Apply estimated weights to the system
+        W = np.ones(y.shape[0])
+
+        # Apply weights based on the grouping method
+        if station_specific_vce:
+            # Station-specific weighting
+            for station_id in np.unique(station_ids):
+                # Create mask for all components of this station
+                station_mask = np.zeros(n_obs, dtype=bool)
+
+                # Find indices for this station
+                north_idx = np.where(station_ids == station_id)[0]
+                east_idx = north_idx + n_sites
+                up_idx = north_idx + 2 * n_sites
+
+                # Set mask for all components
+                for idx in np.concatenate([north_idx, east_idx, up_idx]):
+                    if idx < n_obs:
+                        station_mask[idx] = True
+
+                # Apply weight
+                station_key = f'station_{station_id}'
+                if station_key in normalized_weights:
+                    W[station_mask] = normalized_weights[station_key]
+        else:
+            # Component-specific weighting
+            north_mask = np.zeros(y.shape[0], dtype=bool)
+            east_mask = np.zeros(y.shape[0], dtype=bool)
+            up_mask = np.zeros(y.shape[0], dtype=bool)
+
+            north_mask[:n_sites] = True
+            east_mask[n_sites:2 * n_sites] = True
+            up_mask[2 * n_sites:3 * n_sites] = True
+
+            W[north_mask] = normalized_weights['north']
+            W[east_mask] = normalized_weights['east']
+            W[up_mask] = normalized_weights['up']
+
+        # Weight the system
+        W_sqrt = np.sqrt(W)
+        A_weighted = A * W_sqrt[:, np.newaxis]
+        y_weighted = y * W_sqrt
+
+        # Use weighted matrices for subsequent processing
+        A, y = A_weighted, y_weighted
+
+        print("VCE applied. Proceeding with weighted system.")
+
     # Apply regularization if requested
     if regularize:
         orig_rows = A.shape[0]
@@ -359,6 +701,12 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
         'coefficient_indices': coeff_idx
     }
 
+    if use_vce:
+        result.update({
+            'vce_weights': normalized_weights,
+            'vce_history': vce_history
+        })
+
     # Calculate formal errors if requested
     if calculate_errors:
         if solving_system_method == 'svd':
@@ -478,6 +826,7 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
     print(f"C30 = {coeffs_array[0, 3, 0]:.8e}")
 
     return result
+
 def calculate_potential_coefficients(load_coeffs, love_numbers_file=None, error_info=None, reference_frame="CF"):
     """
     Compute gravity potential coefficients from load coefficients.
@@ -571,9 +920,8 @@ def calculate_potential_coefficients(load_coeffs, love_numbers_file=None, error_
     return result
 
 def compute_gravity_field_coefficients(displacements, max_degree=60, love_numbers_file=None, calculate_errors=False,
-                                      reference_frame="CE", verify_solution=True, save_summary=False,
-                                      output_dir=None, prefix="gravity_coeffs", identifier=None,
-                                      regularization=False, add_helmert=False):
+                                      reference_frame="CE", verify_solution=True,
+                                      regularization=False, add_helmert=False, use_vce=False):
     """
     Convert site displacements into gravity field coefficients using unified least squares adjustment.
 
@@ -622,7 +970,8 @@ def compute_gravity_field_coefficients(displacements, max_degree=60, love_number
         calculate_errors=calculate_errors,
         reference_frame=reference_frame,
         regularize=regularization,
-        add_helmert=add_helmert
+        add_helmert=add_helmert,
+        use_vce=use_vce
     )
 
     # power_spectrum = load_result['load_coefficients'].spectrum(unit='per_l')
@@ -647,8 +996,11 @@ def compute_gravity_field_coefficients(displacements, max_degree=60, love_number
         'load_coefficients': load_result['load_coefficients'],
         'potential_coefficients': potential_result['potential_coefficients'],
         'residuals': load_result['residuals'],
-        'rank': load_result['rank']
+        'rank': load_result['rank'],
     }
+
+    if use_vce:
+        final_result.update({'vce_weights': load_result['vce_weights']})
 
     # Add error information if available
     if calculate_errors:
@@ -822,6 +1174,10 @@ def prepare_displacements_from_df(df):
     lats = df['Latitude'].values
     lons = df['Longitude'].values
 
+    try:
+        code = df.index.get_level_values('CODE').values
+    except:
+        code = list(range(len(lats)))
     # Check for NaN values
     import numpy as np
     mask = ~(np.isnan(north_disp) | np.isnan(east_disp) | np.isnan(up_disp) |
@@ -835,6 +1191,7 @@ def prepare_displacements_from_df(df):
         up_disp = up_disp[mask]
         lats = lats[mask]
         lons = lons[mask]
+        code = code[mask]
 
     # Organize displacements into dictionary
     displacements = {
@@ -842,7 +1199,8 @@ def prepare_displacements_from_df(df):
         'east': east_disp*1e-3,
         'north': north_disp*1e-3,
         'lat': lats,
-        'lon': lons
+        'lon': lons,
+        'code': code
     }
 
     return displacements

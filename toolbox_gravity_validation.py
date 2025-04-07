@@ -892,3 +892,92 @@ def analyze_temporal_evolution(base_dir, start_date=None, end_date=None, coeffic
     print(f"Temporal analysis plot saved to {output_file}")
 
     return fig
+
+def plot_station_weights(station_lats, station_lons, normalized_weights, station_ids,
+                         save_path=None, weight_threshold=0.5):
+    """
+    Plot station weights on a world map.
+
+    Parameters
+    ----------
+    station_lats : array-like
+        Station latitudes
+    station_lons : array-like
+        Station longitudes
+    normalized_weights : dict
+        Dictionary of normalized weights from VCE
+    station_ids : array-like
+        Station IDs corresponding to the keys in normalized_weights
+    save_path : str, optional
+        Path to save the plot
+    weight_threshold : float, optional
+        Threshold to highlight stations with weights below this value
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib import cm
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+    import numpy as np
+
+    # Create figure with map projection
+    plt.figure(figsize=(12, 8))
+    ax = plt.axes(projection=ccrs.Robinson())
+
+    # Add map features
+    ax.add_feature(cfeature.LAND, facecolor='lightgray')
+    ax.add_feature(cfeature.OCEAN, facecolor='lightblue')
+    ax.add_feature(cfeature.COASTLINE)
+    ax.add_feature(cfeature.BORDERS, linestyle=':')
+
+    # Extract weights for each station
+    weights = []
+    for i, station_id in enumerate(station_ids):
+        key = f'station_{station_id}'
+        if key in normalized_weights:
+            weights.append(normalized_weights[key])
+        else:
+            weights.append(1.0)  # Default weight if not found
+
+    weights = np.array(weights)
+
+    # Create colormap
+    cmap = cm.RdYlGn  # Red-Yellow-Green colormap (red=low weights, green=high weights)
+
+    # Plot all stations
+    sc = ax.scatter(station_lons, station_lats, c=weights,
+                    cmap=cmap, transform=ccrs.PlateCarree(),
+                    s=60, alpha=0.8, vmin=0, vmax=1)
+
+    # Highlight stations with low weights
+    low_weight_mask = weights < weight_threshold
+    if np.any(low_weight_mask):
+        ax.scatter(np.array(station_lons)[low_weight_mask],
+                   np.array(station_lats)[low_weight_mask],
+                   c='none', edgecolor='red', s=120, linewidth=2,
+                   transform=ccrs.PlateCarree())
+
+        # Add station labels for low-weight stations
+        for i, (lon, lat) in enumerate(zip(np.array(station_lons)[low_weight_mask],
+                                           np.array(station_lats)[low_weight_mask])):
+            station_id = np.array(station_ids)[low_weight_mask][i]
+            weight = weights[low_weight_mask][i]
+            ax.text(lon, lat, f"{station_id} ({weight:.2f})",
+                    transform=ccrs.PlateCarree(),
+                    fontsize=8, ha='right', va='bottom')
+
+    # Add colorbar
+    cbar = plt.colorbar(sc, orientation='horizontal', pad=0.05, aspect=30)
+    cbar.set_label("Station Weight")
+
+    # Add title and grid
+    plt.title(f"Station Weights from Variance Component Estimation\n" +
+              f"{np.sum(low_weight_mask)}/{len(weights)} stations below threshold ({weight_threshold})")
+    ax.gridlines(draw_labels=True, linestyle='--', alpha=0.5)
+
+    # Adjust layout
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    return plt.gcf()
