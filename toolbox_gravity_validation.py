@@ -375,7 +375,7 @@ def plot_residual_map(validation_results, save_path=None, title=None):
             vmin = vmin_components
             vmax = vmax_components
         else:  # Total residual (always positive)
-            cmap = cm.viridis
+            cmap = 'RdBu_r'
             vmin = 0
             vmax = vmax_total
 
@@ -581,7 +581,7 @@ def plot_displacement_components(displacements, save_path=None, title=None):
 
     # Data to plot
     components = ['north', 'east', 'vertical']
-    component_titles = ['North Displacement', 'East Displacement', 'Vertical Displacement']
+    component_titles = ['North Displacement', 'East Displacement', f'Vertical Displacement | {len(lats)} POINTS']
 
     # Set consistent limits for all components
     vmin = -0.02
@@ -597,7 +597,7 @@ def plot_displacement_components(displacements, save_path=None, title=None):
         ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
 
         # Choose colormap
-        cmap = cm.viridis
+        cmap = 'RdBu_r'#cm.viridis
 
         # Plot data
         sc = ax.scatter(lons, lats, c=data, cmap=cmap, vmin=vmin, vmax=vmax,

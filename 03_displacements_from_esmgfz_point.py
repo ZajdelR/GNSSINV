@@ -2,13 +2,13 @@ import pandas as pd
 from glob import glob
 import os
 
-model = 'S'
+model = 'O'
 frame = 'cf'
 
-out_dir_time = rf'INPUT_CRD/ESMGFZ_{model}_{frame}/TIME/'
+out_dir_time = rf'DATA/DISPLACEMENTS/ESMGFZ_{model}_{frame}_IGSNET/TIME/'
 os.makedirs(out_dir_time,exist_ok=True)
 
-files = glob(rf'SOLUTION_PICKLES_GFZ_IGS1R03/*_{model}_{frame}.PKL')
+files = glob(rf'EXT/ESMGFZLOADING/CODE/*_{model}_{frame}.PKL')
 
 files_df = []
 for x in files:
@@ -21,7 +21,7 @@ for x in files:
 
 results_df = pd.concat(files_df,axis=0).reset_index()
 
-results_df = results_df.rename({'R': 'dU', 'NS': 'dN', 'EW': 'dE', 'datetime':'EPOCH'}, axis=1)
+results_df = results_df.rename({'R': 'dU', 'NS': 'dN', 'EW': 'dE', 'datetime':'EPOCH','index':'EPOCH'}, axis=1)
 
 dftime = results_df.groupby('EPOCH')
 

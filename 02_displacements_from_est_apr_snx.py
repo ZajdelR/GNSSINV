@@ -137,7 +137,7 @@ def process_data(solution, sampling, start_date, end_date, add_periodic=True, lo
 
     # Combine data
     final = pd.concat([apr, est], axis=1)
-    final.loc[:, ['dX', 'dY', 'dZ']] = (final[['EST_X', 'EST_Y', 'EST_Z']].values -
+    final.loc[:, ['dX', 'dY', 'dZ']] = -(final[['EST_X', 'EST_Y', 'EST_Z']].values -
                                         final[['APR_X', 'APR_Y', 'APR_Z']].values) * 1e3
 
     # Check if error columns exist in the EST data
@@ -190,10 +190,9 @@ def process_data(solution, sampling, start_date, end_date, add_periodic=True, lo
             logger.error(f"No lat/lon data found for station {sta}")
             continue
 
-        # MODIFIED ORDER: First convert to topocentric coordinates, then add periodic signals
+        # First convert to topocentric coordinates, then add periodic signals
         df_reset = df.reset_index()
 
-        # Convert to topocentric coordinates first
         try:
             df_with_topo = ecef_to_topo(
                 df_reset,

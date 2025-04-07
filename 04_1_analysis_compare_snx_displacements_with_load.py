@@ -19,8 +19,13 @@ import time
 print_lock = threading.Lock()
 file_lock = threading.Lock()
 
-matplotlib.use('TkAgg')
-plt.ioff()
+import matplotlib
+matplotlib.use('Agg', force=True)  # Use non-interactive backend
+plt.ioff()  # Turn off interactive mode
+
+# Optionally, add this somewhere near imports to suppress any Tkinter warnings
+import warnings
+warnings.filterwarnings("ignore", ".*Tk*")
 
 
 def find_stations(solution, sampling):
@@ -60,24 +65,23 @@ def process_station_wrapper(args):
     Parameters:
     -----------
     args : tuple
-        Tuple containing (sta, sampling, solution, include_components, compare_with)
+        Tuple containing (sta, sampling, solution, reduce_components, compare_components)
 
     Returns:
     --------
     tuple
         (station_name, result) or (station_name, None) if processing failed
     """
-    sta, sampling, solution, include_components, compare_with = args
+    sta, sampling, solution, reduce_components, compare_components = args
     try:
-        result = process_station(sta, sampling, solution, include_components, compare_with)
+        result = process_station(sta, sampling, solution, reduce_components, compare_components)
         return (sta, result)
     except Exception as e:
         with print_lock:
             print(f"Error processing station {sta}: {str(e)}")
         return (sta, None)
 
-
-def process_station(sta, sampling, solution, include_components, compare_with):
+def process_station(sta, sampling, solution, reduce_components, compare_components):
     """
     Process a single station and create comparison plots.
 
@@ -89,10 +93,10 @@ def process_station(sta, sampling, solution, include_components, compare_with):
         Sampling rate
     solution : str
         Solution name
-    include_components : dict
-        Dictionary indicating which components to include in the sum
-    compare_with : str
-        Component to compare with
+    reduce_components : dict
+        Dictionary indicating which components to remove from the original data
+    compare_components : dict
+        Dictionary indicating which components to include in the comparison sum
 
     Returns:
     --------
@@ -113,34 +117,241 @@ def process_station(sta, sampling, solution, include_components, compare_with):
     if df is None:
         return None
 
-    # Load component to compare with
-    compare_df = load_component_data(sta, compare_with)
-    if compare_df is None:
+    # STEP 1: Handle the components to reduce from the original data
+    df_red, reduce_components_name = reduce_components_from_data(sta, df, reduce_components, sampling)
+    if df_red is None:
         return None
 
-    # Create list of components to include in sum
+    # STEP 2: Generate the comparison dataset by summing selected components
+    comp_df, compare_components_name = create_comparison_data(sta, compare_components, sampling)
+    if comp_df is None:
+        return None
+
+    # Find common dates between df_red and comp_df
+    common_dates = df_red.index.intersection(comp_df.index)
+    with print_lock:
+        print(f"Found {len(common_dates)} common dates between the df-{reduce_components_name} and SUM-{compare_components_name} datasets.")
+
+    if len(common_dates) < 10:
+        with print_lock:
+            print(f"Warning: Too few common dates ({len(common_dates)}) for station {sta}. Skipping.")
+        return None
+
+    # Filter to common dates
+    df_common = df_red.loc[common_dates]
+    comp_common = comp_df.loc[common_dates]
+
+    # Remove duplicated index values if any
+    df_common = df_common[~df_common.index.duplicated(keep='first')]
+
+    # Calculate statistics
+    stats = calculate_statistics(df_common, comp_common, common_dates)
+    differences_dU = stats['differences']
+
+    # Calculate standard deviations for original data and individual components
+    std_original_df = df.loc[common_dates]['dU'].std()
+    std_comparison = comp_common['dU'].std()
+    reduction_percent = (1 - stats['rms'] / std_original_df) * 100
+
+    # Calculate standard deviations for each individual component
+    component_stds = calculate_component_stds(sta, common_dates)
+
+    # Create plots
+    fig = create_comparison_plots(sta, df_common, comp_common, differences_dU, stats,
+                                  reduce_components_name, f"SUM-{compare_components_name}", sampling,
+                                  std_original_df)
+
+    # Save the comparison data
+    comparison_data = {
+        'df_reduced': df_common,
+        'compare_component': comp_common,
+        'differences': differences_dU,
+        'reduce_components': reduce_components_name,
+        'compare_components': compare_components_name,
+        'stats': stats,
+        'reduction_percent': reduction_percent,  # Add this line
+        'standard_deviations': {
+            'original_df': std_original_df,
+            'df_reduced': df_common['dU'].std(),
+            'comparison_component': std_comparison,
+            'individual_components': component_stds
+        }
+    }
+
+    # Create filename based on what's being compared
+    output_file = os.path.join(output_dir, 'PKL', f'{solution}_{sta}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}.PKL')
+    with file_lock:
+        pd.to_pickle(comparison_data, output_file)
+        with print_lock:
+            print(f"Comparison data saved to {output_file}")
+
+    # Save the figure as PNG as well
+    fig_output = os.path.join(output_dir, 'TS_COMP',
+                              f'{solution}_{sta}_{sampling}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}.png')
+    with file_lock:
+        plt.savefig(fig_output, dpi=200, bbox_inches='tight')
+        with print_lock:
+            print(f"Figure saved to {fig_output}")
+
+    # Close the figure to free memory
+    plt.close(fig)
+
+    # Print basic statistics for reference
+    with print_lock:
+        print(
+            f"\nStatistics of consistency between df-{reduce_components_name} and SUM-{compare_components_name} for dU:")
+        print(f"Mean difference: {stats['mean']:.4f} mm")
+        print(f"Median difference: {stats['median']:.4f} mm")
+        print(f"Standard deviation: {stats['std']:.4f} mm")
+        print(f"RMS difference: {stats['rms']:.4f} mm")
+        print(f"Reduction: {reduction_percent:.1f}% of original std")
+        print(f"Min/Max difference: {stats['min']:.4f}/{stats['max']:.4f} mm")
+        print(f"Pearson correlation: {stats['correlation']:.4f} (p-value: {stats['p_value']:.2e})")
+        print(f"Variance explained by SUM-{compare_components_name} (R²): {stats['variance_explained']:.2f}%")
+        print(f"Number of common data points: {stats['num_points']}")
+
+        print("\nStandard Deviations:")
+        print(f"Original df: {std_original_df:.4f} mm")
+        print(f"df-{reduce_components_name}: {df_common['dU'].std():.4f} mm")
+        print(f"SUM-{compare_components_name}: {std_comparison:.4f} mm")
+        print("\nIndividual Component Standard Deviations:")
+        for component, std_val in component_stds.items():
+            print(f"Component {component}: {std_val:.4f} mm")
+
+    return comparison_data
+
+def reduce_components_from_data(sta, df, reduce_components, sampling):
+    """
+    Remove selected components from the original data.
+
+    Parameters:
+    -----------
+    sta : str
+        Station name
+    df : pandas.DataFrame
+        Original displacement data
+    reduce_components : dict
+        Dictionary indicating which components to remove
+    sampling : str
+        Sampling rate
+
+    Returns:
+    --------
+    tuple
+        (reduced_df, components_name) where reduced_df is the DataFrame with components removed
+        and components_name is a string representation of the removed components
+    """
+    # Create list of components to remove
     component_labels = []
     files = []
 
-    if include_components['A']:
+    if reduce_components['A']:
         file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_A_cf.PKL'
         if os.path.exists(file_path):
             files.append(file_path)
             component_labels.append('A')
 
-    if include_components['O']:
+    if reduce_components['O']:
         file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_O_cf.PKL'
         if os.path.exists(file_path):
             files.append(file_path)
             component_labels.append('O')
 
-    if include_components['S']:
+    if reduce_components['S']:
         file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_S_cf.PKL'
         if os.path.exists(file_path):
             files.append(file_path)
             component_labels.append('S')
 
-    if include_components['H']:
+    if reduce_components['H']:
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_H_cf.PKL'
+        if os.path.exists(file_path):
+            files.append(file_path)
+            component_labels.append('H')
+
+    # Convert index to date for consistency
+    df.index = df.index.date
+
+    # Load and combine selected components to remove
+    if files:
+        with file_lock:
+            files_df = {os.path.basename(x): pd.read_pickle(x) for x in files}
+        sum_df, name = combine_selected_files(files_df)
+        sum_df = sum_df.rename({'R': 'dU', 'NS': 'dN', 'EW': 'dE'}, axis=1)
+
+        # Convert index to date for consistency
+        sum_df.index = sum_df.index.date
+
+        if sampling == '07D':
+            sum_df[['gpsweek', 'doy']] = pd.DataFrame(
+                sum_df.index.map(
+                    lambda x: dt2gpstime(datetime.datetime.combine(x, datetime.time()))
+                ).tolist(),
+                index=sum_df.index
+            )
+            sum_df = aggregate_gps_data(sum_df)
+
+            df[['gpsweek', 'doy']] = pd.DataFrame(
+                df.index.map(
+                    lambda x: dt2gpstime(datetime.datetime.combine(x, datetime.time()))
+                ).tolist(),
+                index=df.index
+            )
+            df = aggregate_gps_data(df)
+
+        # Remove summed components from main data
+        df_red = (df - sum_df).dropna()
+        components_name = ''.join(component_labels)
+    else:
+        # If no components selected for removal, use original data
+        df_red = df
+        components_name = "None"
+
+    return df_red, components_name
+
+
+def create_comparison_data(sta, compare_components, sampling):
+    """
+    Create a comparison dataset by summing selected components.
+
+    Parameters:
+    -----------
+    sta : str
+        Station name
+    compare_components : dict
+        Dictionary indicating which components to include in the sum
+    sampling : str
+        Sampling rate
+
+    Returns:
+    --------
+    tuple
+        (comp_df, components_name) where comp_df is the summed DataFrame
+        and components_name is a string representation of the included components
+    """
+    # Create list of components to include in sum
+    component_labels = []
+    files = []
+
+    if compare_components['A']:
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_A_cf.PKL'
+        if os.path.exists(file_path):
+            files.append(file_path)
+            component_labels.append('A')
+
+    if compare_components['O']:
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_O_cf.PKL'
+        if os.path.exists(file_path):
+            files.append(file_path)
+            component_labels.append('O')
+
+    if compare_components['S']:
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_S_cf.PKL'
+        if os.path.exists(file_path):
+            files.append(file_path)
+            component_labels.append('S')
+
+    if compare_components['H']:
         file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_H_cf.PKL'
         if os.path.exists(file_path):
             files.append(file_path)
@@ -153,10 +364,8 @@ def process_station(sta, sampling, solution, include_components, compare_with):
         sum_df, name = combine_selected_files(files_df)
         sum_df = sum_df.rename({'R': 'dU', 'NS': 'dN', 'EW': 'dE'}, axis=1)
 
-        # Convert indices to date objects for consistency
-        df.index = df.index.date
+        # Convert index to date for consistency
         sum_df.index = sum_df.index.date
-        compare_df.index = compare_df.index.date
 
         if sampling == '07D':
             sum_df[['gpsweek', 'doy']] = pd.DataFrame(
@@ -167,114 +376,13 @@ def process_station(sta, sampling, solution, include_components, compare_with):
             )
             sum_df = aggregate_gps_data(sum_df)
 
-            compare_df[['gpsweek', 'doy']] = pd.DataFrame(
-                compare_df.index.map(
-                    lambda x: dt2gpstime(datetime.datetime.combine(x, datetime.time()))
-                ).tolist(),
-                index=compare_df.index
-            )
-            compare_df = aggregate_gps_data(compare_df)
-
-        # Remove summed components from main data
-        df_red = (df - sum_df).dropna()
-
-        # Create a descriptive name for the summed components
-        sum_components_name = ''.join(component_labels)
+        components_name = ''.join(component_labels)
+        return sum_df, components_name
     else:
-        # If no components selected for sum, use original data
-        df.index = df.index.date
-        compare_df.index = compare_df.index.date
-        df_red = df
-        sum_components_name = "None"
-
-    # Find common dates between df_red and compare_df
-    common_dates = df_red.index.intersection(compare_df.index)
-    with print_lock:
-        print(
-            f"Found {len(common_dates)} common dates between the df-{sum_components_name} and {compare_with} datasets.")
-
-    if len(common_dates) < 10:
+        # If no components selected, return None
         with print_lock:
-            print(f"Warning: Too few common dates ({len(common_dates)}) for station {sta}. Skipping.")
-        return None
-
-    # Filter to common dates
-    df_common = df_red.loc[common_dates]
-    comp_common = compare_df.loc[common_dates]
-
-    # Remove duplicated index values if any
-    df_common = df_common[~df_common.index.duplicated(keep='first')]
-
-    # Calculate statistics
-    stats = calculate_statistics(df_common, comp_common, common_dates)
-    differences_dU = stats['differences']
-
-    # Calculate standard deviations for original data and individual components
-    std_original_df = df.loc[common_dates]['dU'].std()
-    std_comparison = comp_common['dU'].std()
-
-    # Calculate standard deviations for each individual component
-    component_stds = calculate_component_stds(sta, common_dates)
-
-    # Create plots
-    fig = create_comparison_plots(sta, df_common, comp_common, differences_dU, stats,
-                                  sum_components_name, compare_with, sampling)
-
-    # Save the comparison data
-    comparison_data = {
-        'df_reduced': df_common,
-        'compare_component': comp_common,
-        'differences': differences_dU,
-        'sum_components': sum_components_name,
-        'compare_with': compare_with,
-        'stats': stats,
-        'standard_deviations': {
-            'original_df': std_original_df,
-            'df_reduced': df_common['dU'].std(),
-            'comparison_component': std_comparison,
-            'individual_components': component_stds
-        }
-    }
-
-    # Create filename based on what's being compared
-    output_file = os.path.join(output_dir, 'PKL', f'{solution}_{sta}_WO-{sum_components_name}_VS_{compare_with}.PKL')
-    with file_lock:
-        pd.to_pickle(comparison_data, output_file)
-        with print_lock:
-            print(f"Comparison data saved to {output_file}")
-
-    # Save the figure as PNG as well
-    fig_output = os.path.join(output_dir, 'TS_COMP',
-                              f'{solution}_{sta}_{sampling}_WO-{sum_components_name}_VS_{compare_with}.png')
-    with file_lock:
-        plt.savefig(fig_output, dpi=200, bbox_inches='tight')
-        with print_lock:
-            print(f"Figure saved to {fig_output}")
-
-    # Close the figure to free memory
-    plt.close(fig)
-
-    # Print basic statistics for reference
-    with print_lock:
-        print(f"\nStatistics of consistency between df-{sum_components_name} and {compare_with} for dU:")
-        print(f"Mean difference: {stats['mean']:.4f} mm")
-        print(f"Median difference: {stats['median']:.4f} mm")
-        print(f"Standard deviation: {stats['std']:.4f} mm")
-        print(f"RMS difference: {stats['rms']:.4f} mm")
-        print(f"Min/Max difference: {stats['min']:.4f}/{stats['max']:.4f} mm")
-        print(f"Pearson correlation: {stats['correlation']:.4f} (p-value: {stats['p_value']:.2e})")
-        print(f"Variance explained by {compare_with} (R²): {stats['variance_explained']:.2f}%")
-        print(f"Number of common data points: {stats['num_points']}")
-
-        print("\nStandard Deviations:")
-        print(f"Original df: {std_original_df:.4f} mm")
-        print(f"df-{sum_components_name}: {df_common['dU'].std():.4f} mm")
-        print(f"{compare_with}: {std_comparison:.4f} mm")
-        print("\nIndividual Component Standard Deviations:")
-        for component, std_val in component_stds.items():
-            print(f"Component {component}: {std_val:.4f} mm")
-
-    return comparison_data
+            print(f"Warning: No components selected for comparison for station {sta}")
+        return None, "None"
 
 def aggregate_gps_data(df):
     """
@@ -499,10 +607,31 @@ def calculate_component_stds(sta, common_dates):
     return component_stds
 
 
-def create_comparison_plots(sta, df_common, comp_common, differences, stats, sum_components_name, compare_with,
-                            sampling):
+def create_comparison_plots(sta, df_common, comp_common, differences, stats, reduce_components_name,
+                            compare_components_name, sampling, std_original_df):
     """
     Create comparison plots for a specific station with improved Lomb-Scargle implementation.
+
+    Parameters:
+    -----------
+    sta : str
+        Station name
+    df_common : pandas.DataFrame
+        DataFrame with reduced components
+    comp_common : pandas.DataFrame
+        DataFrame with components to compare
+    differences : pandas.Series
+        Series with differences between df_common and comp_common
+    stats : dict
+        Dictionary with statistics
+    reduce_components_name : str
+        String representation of components reduced from original data
+    compare_components_name : str
+        String representation of components being compared
+    sampling : str
+        Sampling rate
+    std_original_df : float
+        Standard deviation of the original data
     """
     import numpy as np
     import matplotlib.pyplot as plt
@@ -546,9 +675,9 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, sum
     # Time series subplot (upper left, 2/3 width)
     ax_timeseries = fig.add_subplot(gs[0, 0])
     ax_timeseries.plot(df_common.index, df_common['dU'], '-', linewidth=0.5,
-                       label=f'df-{sum_components_name} dU', color='blue', alpha=0.7, markersize=0)
+                       label=f'df-{reduce_components_name} dU', color='blue', alpha=0.7, markersize=0)
     ax_timeseries.plot(comp_common.index, comp_common['dU'], '--', linewidth=0.5,
-                       label=f'{compare_with} dU', color='red', alpha=0.7, markersize=0)
+                       label=f'{compare_components_name} dU', color='red', alpha=0.7, markersize=0)
 
     # Find min and max values for setting symmetric ylim rounded to nearest multiple of 5
     all_values = np.concatenate([df_common['dU'].dropna().values, comp_common['dU'].dropna().values])
@@ -655,8 +784,8 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, sum
         # Add annual amplitude information in the top left
         amp_text = (
             f"Annual amplitude:\n"
-            f"{sum_components_name}: {annual_amp1:.2f} mm\n"
-            f"{compare_with}: {annual_amp2:.2f} mm"
+            f"df-{reduce_components_name}: {annual_amp1:.2f} mm\n"
+            f"{compare_components_name}: {annual_amp2:.2f} mm"
         )
         ax_timeseries.text(0.02, 0.95, amp_text,
                            transform=ax_timeseries.transAxes,
@@ -667,8 +796,8 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, sum
 
         std_text = (
             f"Std of series:\n"
-            f"{sum_components_name}: {valid_dU1.std():.2f} mm\n"
-            f"{compare_with}: {valid_dU2.std():.2f} mm"
+            f"df-{reduce_components_name}: {valid_dU1.std():.2f} mm\n"
+            f"{compare_components_name}: {valid_dU2.std():.2f} mm"
         )
 
         ax_timeseries.text(0.02, 0.20, std_text,
@@ -703,8 +832,8 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, sum
             print(f"Semi-annual amplitude: {amplitude1[semiannual_idx]:.2f} mm, {amplitude2[semiannual_idx]:.2f} mm")
 
         # Plot the periodograms
-        ax_lomb.plot(period, amplitude1, '-', color='blue', alpha=0.7, label=f'df-{sum_components_name}')
-        ax_lomb.plot(period, amplitude2, '-', color='red', alpha=0.7, label=f'{compare_with}')
+        ax_lomb.plot(period, amplitude1, '-', color='blue', alpha=0.7, label=f'df-{reduce_components_name}')
+        ax_lomb.plot(period, amplitude2, '-', color='red', alpha=0.7, label=f'{compare_components_name}')
         ax_lomb.set_xlabel('Period (days)', fontsize=10, labelpad=8)
         ax_lomb.set_ylabel('Amplitude (mm)', fontsize=10)
         ax_lomb.set_title('Lomb-Scargle Periodogram')
@@ -743,13 +872,16 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, sum
     diff_ylim = np.ceil(diff_max / 5) * 5
     ax_diff.set_ylim(-diff_ylim, diff_ylim)
 
-    ax_diff.set_ylabel(f'Difference (df-{sum_components_name} - {compare_with})')
-    ax_diff.set_title(f'Differences Between df-{sum_components_name} and {compare_with} for dU')
+    ax_diff.set_ylabel(f'Difference (df-{reduce_components_name} - {compare_components_name})')
+    ax_diff.set_title(f'Differences Between df-{reduce_components_name} and {compare_components_name} for dU')
     ax_diff.grid(True, linestyle='--', alpha=0.6)
     # ax_diff.set_xlim(datetime.datetime(2004,1,1),datetime.datetime(2008,1,1))
 
+    # Update rms_diff_text to include reduction percentage
+    reduction_percent = (1 - stats['rms'] / std_original_df) * 100
     rms_diff_text = (
-        f"RMS of differences: {stats['rms']:.2f} mm"
+        f"RMS of differences: {stats['rms']:.2f} mm\n"
+        f"Reduction: {reduction_percent:.1f}% of orig. std"
     )
 
     ax_diff.text(0.02, 0.95, rms_diff_text,
@@ -817,7 +949,7 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, sum
     ax_hist.axvline(x=0, color='k', linestyle='--')
     ax_hist.axvline(x=stats['mean'], color='r', linestyle='-', label=f'Mean: {stats["mean"]:.4f}')
     ax_hist.axvline(x=stats['median'], color='g', linestyle='-', label=f'Median: {stats["median"]:.4f}')
-    ax_hist.set_xlabel(f'Difference (df-{sum_components_name} - {compare_with}) for dU')
+    ax_hist.set_xlabel(f'Difference (df-{reduce_components_name} - {compare_components_name}) for dU')
     ax_hist.set_ylabel('Frequency')
     ax_hist.set_title('Distribution of Differences')
     ax_hist.legend(fontsize=9)
@@ -830,14 +962,14 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, sum
     min_val = min(df_common['dU'].min(), comp_common['dU'].min())
     max_val = max(df_common['dU'].max(), comp_common['dU'].max())
     ax_scatter.plot([min_val, max_val], [min_val, max_val], 'k--')
-    ax_scatter.set_xlabel(f'df-{sum_components_name} dU values')
-    ax_scatter.set_ylabel(f'{compare_with} dU values')
+    ax_scatter.set_xlabel(f'df-{reduce_components_name} dU values')
+    ax_scatter.set_ylabel(f'{compare_components_name} dU values')
     ax_scatter.set_title(f'Correlation (r={stats["correlation"]:.4f}, R²={stats["r_squared"]:.4f})')
     ax_scatter.grid(True, linestyle='--', alpha=0.6)
 
     # Add a main title for the entire figure
     fig.suptitle(
-        f'Comparison of dU Time Series (df-{sum_components_name} vs {compare_with}) for Station {sta}\nSampling: {sampling}',
+        f'Comparison of dU Time Series (df-{reduce_components_name} vs {compare_components_name}) for Station {sta}\nSampling: {sampling}',
         fontsize=16, y=0.98)
 
     # Adjust layout to prevent overlapping
@@ -846,27 +978,29 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, sum
 
     return fig
 
-
 def main():
-    """Main function to process all stations using multiple threads."""
+    """Main function to process all stations with enhanced options for component handling."""
     # Parameters to customize analysis
     sampling = '01D'
-    # solution = 'IGS1R03SNX'
-    solution = 'ITRF2020-IGS-RES'
+    solution = 'ITRF2020-ILRS-RES'
 
-    # Select which components to include in the sum (set to True or False)
-    include_components = {
-        'A': False,  # Atmospheric loading
-        'O': False,  # Ocean loading
-        'S': False,  # Surface water loading
-        'H': False  # Hydrological loading
+    # Select which components to remove from the original data (set to True to remove)
+    reduce_components = {
+        'A': 1,  # Atmospheric loading
+        'O': 1,  # Ocean loading
+        'S': 1,  # Surface water loading
+        'H': False   # Hydrological loading
     }
 
-    # Select which component to compare with (one of 'A', 'H', 'O', 'S')
-    compare_with = 'A'  # A is Atmospheric loading
+    # Select which components to include in the comparison sum (set to True to include)
+    compare_components = {
+        'A': 0,   # Atmospheric loading
+        'O': 0,  # Ocean loading
+        'S': 0,  # Surface water loading
+        'H': 1   # Hydrological loading
+    }
 
     # Determine the number of workers (threads)
-    # Using CPU count - 1 to leave one core free for system operations
     max_workers = max(1, os.cpu_count() - 1)
 
     # Check if specific stations are provided as command line arguments
@@ -881,6 +1015,8 @@ def main():
             print(f"Found {len(stations)} stations: {', '.join(stations)}")
 
     # Prepare output directory
+    reduce_str = "".join([k for k, v in reduce_components.items() if v])
+    compare_str = "".join([k for k, v in compare_components.items() if v])
     out_path = f"OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL"
     with file_lock:
         os.makedirs(out_path, exist_ok=True)
@@ -890,11 +1026,13 @@ def main():
     # Process stations in parallel using ThreadPoolExecutor
     with print_lock:
         print(f"\nStarting multithreaded processing with {max_workers} worker threads")
+        print(f"Reducing original data by components: {reduce_str if reduce_str else 'None'}")
+        print(f"Comparing with summed components: {compare_str if compare_str else 'None'}")
 
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Create arguments for each station
-        args_list = [(sta, sampling, solution, include_components, compare_with) for sta in stations]
+        args_list = [(sta, sampling, solution, reduce_components, compare_components) for sta in stations]
 
         # Submit all tasks and get Future objects
         future_to_station = {
@@ -930,7 +1068,7 @@ def main():
         print(f"Successfully processed {len(results)} out of {len(stations)} stations.")
 
     # Create a summary of all stations
-    summary_file = f'{out_path}/{solution}_ALL_STATIONS_WO-{"".join([k for k, v in include_components.items() if v])}_VS_{compare_with}_SUMMARY.PKL'
+    summary_file = f'{out_path}/{solution}_ALL_STATIONS_WO-{reduce_str}_VS_SUM-{compare_str}_SUMMARY.PKL'
 
     # Extract key statistics for all stations
     summary_stats = {}
@@ -939,6 +1077,7 @@ def main():
             'correlation': result['stats']['correlation'],
             'variance_explained': result['stats']['variance_explained'],
             'rms': result['stats']['rms'],
+            'reduction_percent': result['reduction_percent'],  # Add this line
             'num_points': result['stats']['num_points'],
             'std': {
                 'original': result['standard_deviations']['original_df'],

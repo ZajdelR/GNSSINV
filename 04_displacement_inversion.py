@@ -12,8 +12,10 @@ import gc  # Add garbage collection module
 from toolbox_displacement_to_gravity_coefficients import (
     compute_gravity_field_coefficients,
     prepare_displacements_from_df,
-    export_coefficients
+    export_coefficients,
+    save_processing_summary
 )
+
 from toolbox_gravity_validation import (
     validate_coefficient_solution,
     analyze_coefficient_spectrum,
@@ -24,13 +26,15 @@ from toolbox_gravity_validation import (
     analyze_temporal_evolution
 )
 
+
 def process_date(date, df, lat_lon, love_number_file,
                  max_degree, output_dir, frame,
                  calculate_errors=False,
                  monte_carlo=False,
                  print_maps=False,
                  regularization=False,
-                 add_helmert=False):
+                 add_helmert=False,
+                 reduce_components=None):
     """
     Process a single date from the dataset.
 
@@ -52,6 +56,8 @@ def process_date(date, df, lat_lon, love_number_file,
         Whether to calculate formal errors
     monte_carlo : bool
         Whether to perform Monte Carlo analysis
+    reduce_components : dict, optional
+        Dictionary indicating which components to remove (A, O, S, H)
 
     Returns:
     --------
@@ -59,6 +65,9 @@ def process_date(date, df, lat_lon, love_number_file,
         Dictionary containing the calculated coefficients and errors
     """
     try:
+        # Convert date to string for file paths
+        date_str = date.strftime('%Y%m%d')
+
         # Merge with station coordinates
         if 'Latitude' not in df.columns:
             merged_df = df.merge(lat_lon[['Latitude', 'Longitude']], left_on='CODE', right_index=True)
@@ -66,16 +75,26 @@ def process_date(date, df, lat_lon, love_number_file,
             merged_df = df.copy()
             del df  # Delete the original dataframe to free memory
 
-        displacements = prepare_displacements_from_df(merged_df)
-        # pd.DataFrame(displacements).to_csv('test_displacements_grid_IGS.csv')
+        # Apply component reduction if specified
+        components_name = "None"
+        rms_reduction_info = None
+        if reduce_components:
+            merged_df, components_name, rms_reduction_info = reduce_components_from_data(merged_df, date_str, reduce_components)
+            print(f"Reduced components: {components_name}")
 
-        # Create date-specific output directory
-        date_str = date.strftime('%Y%m%d')
+        displacements = prepare_displacements_from_df(merged_df)
+
+        # Create date-specific output directory with component reduction info if applicable
         date_output_dir = os.path.join(output_dir, date_str)
+
         os.makedirs(date_output_dir, exist_ok=True)
 
         print(f"\nProcessing date: {date}")
-        identifier = f'SLD_{max_degree}_{date_str}'
+
+        # Add component reduction info to the identifier if applicable
+        comp_suffix = f"_WO-{components_name}" if components_name != "None" else ""
+        identifier = f'SLD_{max_degree}_{date_str}{comp_suffix}'
+
         # Process the dataframe to compute spherical harmonic coefficients
         coeffs = compute_gravity_field_coefficients(
             displacements=displacements,
@@ -83,13 +102,27 @@ def process_date(date, df, lat_lon, love_number_file,
             love_numbers_file=love_number_file,
             calculate_errors=calculate_errors,
             reference_frame=frame,
-            save_summary=True,
             output_dir=date_output_dir,
             identifier=identifier,
             regularization=regularization,
             add_helmert=add_helmert
         )
 
+        # Add reference frame to the result dictionary for inclusion in summary
+        coeffs['reference_frame'] = frame
+        coeffs['max_degree'] = max_degree
+
+        # Add RMS reduction information to coefficients if available
+        if rms_reduction_info:
+            coeffs['rms_reduction'] = rms_reduction_info
+
+        # Save the summary
+        summary_files = save_processing_summary(
+            coeffs,
+            output_dir=date_output_dir,
+            identifier=identifier,
+            formats=['yaml']
+        )
 
         # Export the coefficients
         export_coefficients(coeffs, date_output_dir, prefix="gravity_coeffs",
@@ -113,7 +146,9 @@ def process_date(date, df, lat_lon, love_number_file,
 
         if print_maps:
             # Create residual maps
-            plot_displacement_components(displacements, save_path=os.path.join(validation_dir, f"{identifier}_displacements_map.png"), title=f"Displacements for {date_str}")
+            plot_displacement_components(displacements,
+                                         save_path=os.path.join(validation_dir, f"{identifier}_displacements_map.png"),
+                                         title=f"Displacements for {date_str}")
             print("Creating residual maps...")
             residual_map = plot_residual_map(
                 validation,
@@ -164,6 +199,10 @@ def process_date(date, df, lat_lon, love_number_file,
         if 'residuals' in coeffs and coeffs['residuals'] is not None:
             print(f"  - RMS of residuals: {coeffs['residuals']:.6e} m")
 
+        # Add component reduction info to the summary if applicable
+        if components_name != "None":
+            print(f"  - Components removed: {components_name}")
+
         print(f"  - Results saved to: {date_output_dir}")
 
         return coeffs
@@ -183,10 +222,11 @@ def process_date(date, df, lat_lon, love_number_file,
             del validation
         if 'spectral_results' in locals():
             del spectral_results
+        if 'rms_reduction_info' in locals():
+            del rms_reduction_info
 
         # Force garbage collection
         gc.collect()
-
 def filter_files_by_date_range(directory_path, start_date, end_date):
     """
     Filter files in a directory based on date range in filename.
@@ -216,6 +256,261 @@ def filter_files_by_date_range(directory_path, start_date, end_date):
 
     return filtered_files
 
+
+def subtract_dataframes(original_df, combined_df):
+    """
+    Subtract values from combined_df from original_df, aligning by EPOCH and CODE.
+
+    Parameters:
+    -----------
+    original_df : pandas.DataFrame
+        Original dataframe with MultiIndex (EPOCH, CODE, SOLN, DOMES)
+    combined_df : pandas.DataFrame
+        Dataframe with values to subtract, index should contain EPOCH and CODE
+
+    Returns:
+    --------
+    pandas.DataFrame
+        Resulting dataframe with the same structure as original_df
+        but with dN, dE, dU values subtracted
+    """
+    # Create copies to avoid modifying the originals
+    df1 = original_df.copy()
+    df2 = combined_df.copy()
+
+    # Reset index of the original dataframe to work with it more easily
+    df1_reset = df1.reset_index()
+
+    # If the combined_df is not already reset, reset it too
+    if isinstance(df2.index, pd.MultiIndex) or df2.index.name:
+        df2_reset = df2.reset_index()
+    else:
+        df2_reset = df2.copy()
+
+    # Extract EPOCH and CODE from combined_df index if they're in the index
+    # If the combined_df has EPOCH and CODE as columns already, skip this part
+    if 'EPOCH' not in df2_reset.columns and 'index' in df2_reset.columns:
+        # Parse the index assuming format like "2018-01-02/00NA"
+        df2_reset[['EPOCH', 'CODE']] = df2_reset['index'].str.split('/', n=1, expand=True)
+        df2_reset = df2_reset.drop('index', axis=1)
+
+    # Now merge the dataframes on EPOCH and CODE
+    result = pd.merge(df1_reset, df2_reset[['EPOCH', 'CODE', 'dN', 'dE', 'dU']],
+                      on=['EPOCH', 'CODE'],
+                      how='left',
+                      suffixes=('', '_to_subtract'))
+
+    # Perform the subtraction for rows that have matching values in combined_df
+    # Handle NaN values that may occur if there's no match in combined_df
+    result['dN'] = result.apply(lambda row: row['dN'] - row['dN_to_subtract']
+    if pd.notna(row['dN_to_subtract']) else row['dN'], axis=1)
+    result['dE'] = result.apply(lambda row: row['dE'] - row['dE_to_subtract']
+    if pd.notna(row['dE_to_subtract']) else row['dE'], axis=1)
+    result['dU'] = result.apply(lambda row: row['dU'] - row['dU_to_subtract']
+    if pd.notna(row['dU_to_subtract']) else row['dU'], axis=1)
+
+    # Drop the columns we no longer need
+    result = result.drop(['dN_to_subtract', 'dE_to_subtract', 'dU_to_subtract'], axis=1)
+
+    # Set the index back to original form
+    index_columns = [x for x in result.columns if x in ['EPOCH', 'CODE', 'SOLN', 'DOMES','FLAG','S']]
+    result = result.set_index(index_columns)
+
+    return result
+
+
+def calculate_rms(df):
+    """
+    Calculate RMS values for displacement components.
+
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame containing dN, dE, dU columns
+
+    Returns:
+    --------
+    dict
+        Dictionary with RMS values for each component
+    """
+    import numpy as np
+
+    # Calculate RMS for each component
+    rms_n = np.sqrt(np.mean(df['dN'] ** 2))
+    rms_e = np.sqrt(np.mean(df['dE'] ** 2))
+    rms_u = np.sqrt(np.mean(df['dU'] ** 2))
+
+    return {
+        'north': float(rms_n),
+        'east': float(rms_e),
+        'up': float(rms_u)
+    }
+
+
+def reduce_components_from_data(df, date_str, reduce_components):
+    """
+    Remove selected components from the original data and track RMS reduction.
+
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        Original displacement data
+    date_str : str
+        Date string in format 'YYYYMMDD'
+    reduce_components : dict
+        Dictionary indicating which components to remove
+
+    Returns:
+    --------
+    tuple
+        (reduced_df, components_name, rms_reduction_info) where:
+        - reduced_df is the DataFrame with components removed
+        - components_name is a string representation of the removed components
+        - rms_reduction_info is a dictionary with RMS reduction information
+    """
+    import pandas as pd
+    import os
+    import datetime
+
+    # Create list of components to remove
+    component_labels = []
+    component_dfs = []
+
+    # Calculate original RMS values
+    original_rms = calculate_rms(df)
+    print(
+        f"Original RMS: North={original_rms['north']:.3e}m, East={original_rms['east']:.3e}m, Up={original_rms['up']:.3e}m")
+
+    # Store RMS reduction information
+    rms_reduction_info = {
+        'original_rms': original_rms,
+        'component_reductions': {}
+    }
+
+    # Determine which components to reduce
+    components_to_process = []
+
+    if reduce_components['A']:
+        file_path = f'DATA/DISPLACEMENTS/ESMGFZ_A_cf_IGSNET/TIME/ESMGFZ_{date_str}_A_cf_DISP.PKL'
+        if os.path.exists(file_path):
+            components_to_process.append(('A', file_path))
+            print(f"Found component A data for {date_str}")
+
+    if reduce_components['O']:
+        file_path = f'DATA/DISPLACEMENTS/ESMGFZ_O_cf_IGSNET/TIME/ESMGFZ_{date_str}_O_cf_DISP.PKL'
+        if os.path.exists(file_path):
+            components_to_process.append(('O', file_path))
+            print(f"Found component O data for {date_str}")
+
+    if reduce_components['S']:
+        file_path = f'DATA/DISPLACEMENTS/ESMGFZ_S_cf_IGSNET/TIME/ESMGFZ_{date_str}_S_cf_DISP.PKL'
+        if os.path.exists(file_path):
+            components_to_process.append(('S', file_path))
+            print(f"Found component S data for {date_str}")
+
+    if reduce_components['H']:
+        file_path = f'DATA/DISPLACEMENTS/ESMGFZ_H_cf_IGSNET/TIME/ESMGFZ_{date_str}_H_cf_DISP.PKL'
+        if os.path.exists(file_path):
+            components_to_process.append(('H', file_path))
+            print(f"Found component H data for {date_str}")
+
+    # If no components to reduce, return original data
+    if not components_to_process:
+        return df, "None", rms_reduction_info
+
+    # Function to truncate datetime to date in MultiIndex
+    def truncate_date_in_multiindex(df):
+        # Create a copy to avoid modifying the original
+        df_copy = df.copy()
+
+        # Check if we need to truncate EPOCH to date
+        if isinstance(df.index, pd.MultiIndex) and 'EPOCH' in df.index.names:
+            # Get the current index values
+            index_values = list(df.index)
+            epoch_pos = df.index.names.index('EPOCH')
+
+            # Create new index with truncated datetime
+            new_index = []
+            for idx in index_values:
+                idx_list = list(idx)
+                # Truncate datetime to date
+                if isinstance(idx[epoch_pos], (pd.Timestamp, datetime.datetime)):
+                    idx_list[epoch_pos] = idx[epoch_pos].date()
+                new_index.append(tuple(idx_list))
+
+            # Set the new index
+            df_copy.index = pd.MultiIndex.from_tuples(new_index, names=df.index.names)
+
+        return df_copy
+
+    # Create a copy of the original DataFrame with truncated dates
+    df_red = df.copy()
+    df_date_trunc = truncate_date_in_multiindex(df)
+
+    # Process each component dataframe sequentially and track RMS reduction
+    current_df = df_date_trunc.copy()
+
+    for comp_label, file_path in components_to_process:
+        # Load component data
+        comp_df = pd.read_pickle(file_path)
+        comp_df = truncate_date_in_multiindex(comp_df)
+
+        # Subtract this component
+        next_df = subtract_dataframes(current_df, comp_df)
+
+        # Calculate RMS after this component reduction
+        reduced_rms = calculate_rms(next_df)
+
+        # Calculate percentage reduction
+        percent_reduction = {
+            'north': float((original_rms['north'] - reduced_rms['north']) / original_rms['north'] * 100),
+            'east': float((original_rms['east'] - reduced_rms['east']) / original_rms['east'] * 100),
+            'up': float((original_rms['up'] - reduced_rms['up']) / original_rms['up'] * 100)
+        }
+
+        # Print RMS reduction information
+        print(f"After removing component {comp_label}:")
+        print(f"  RMS: North={reduced_rms['north']:.3e}m, East={reduced_rms['east']:.3e}m, Up={reduced_rms['up']:.3e}m")
+        print(
+            f"  Reduction: North={percent_reduction['north']:.2f}%, East={percent_reduction['east']:.2f}%, Up={percent_reduction['up']:.2f}%")
+
+        # Store RMS reduction information
+        rms_reduction_info['component_reductions'][comp_label] = {
+            'rms': reduced_rms,
+            'percent_reduction': percent_reduction
+        }
+
+        # Update current dataframe for next iteration
+        current_df = next_df
+        component_labels.append(comp_label)
+
+    # Final reduced dataframe
+    df_red = current_df
+
+    # Calculate total RMS reduction
+    final_rms = calculate_rms(df_red)
+    total_reduction = {
+        'north': (original_rms['north'] - final_rms['north']) / original_rms['north'] * 100,
+        'east': (original_rms['east'] - final_rms['east']) / original_rms['east'] * 100,
+        'up': (original_rms['up'] - final_rms['up']) / original_rms['up'] * 100
+    }
+
+    # Store total reduction information
+    rms_reduction_info['final_rms'] = final_rms
+    rms_reduction_info['total_reduction'] = total_reduction
+
+    # Print total reduction information
+    print(f"Total RMS reduction after removing {', '.join(component_labels)}:")
+    print(f"  Final RMS: North={final_rms['north']:.3e}m, East={final_rms['east']:.3e}m, Up={final_rms['up']:.3e}m")
+    print(
+        f"  Total reduction: North={total_reduction['north']:.2f}%, East={total_reduction['east']:.2f}%, Up={total_reduction['up']:.2f}%")
+
+    # Create a string representing the removed components
+    components_name = ''.join(component_labels)
+
+    return df_red, components_name, rms_reduction_info
+
+
 def main():
     """
     Main function to process all dates in the dataset with error analysis.
@@ -239,7 +534,8 @@ def main():
                         help='Path to station coordinates file')
     parser.add_argument('--latlon', type=str, default='EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.pkl',
                         help='Path to station coordinates file')
-    parser.add_argument('--sta_availability', type=str, default='EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_AVAILABILITY.pkl',
+    parser.add_argument('--sta_availability', type=str,
+                        default='EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_AVAILABILITY.pkl',
                         help='Path to station coordinates file')
     parser.add_argument('--love', type=str, default=r'EXT/LLNs/ak135-LLNs-complete.dat',
                         help='Path to Love numbers file')
@@ -262,6 +558,16 @@ def main():
     parser.add_argument('--regularization', action='store_true', default=False,
                         help='Use regularization')
 
+    # Add arguments for component reduction
+    parser.add_argument('--reduce_A', action='store_true', default=False,
+                        help='Reduce atmospheric loading component')
+    parser.add_argument('--reduce_O', action='store_true', default=False,
+                        help='Reduce ocean loading component')
+    parser.add_argument('--reduce_S', action='store_true', default=False,
+                        help='Reduce surface water loading component')
+    parser.add_argument('--reduce_H', action='store_true', default=True,
+                        help='Reduce hydrological loading component')
+
     args = parser.parse_args()
 
     args.input = rf'DATA/DISPLACEMENTS/{args.solution}/TIME/'
@@ -278,6 +584,30 @@ def main():
 
     if args.regularization:
         args.output += '_REG'
+
+    # Create component reduction dictionary
+    reduce_components = None
+    if any([args.reduce_A, args.reduce_O, args.reduce_S, args.reduce_H]):
+        reduce_components = {
+            'A': args.reduce_A,
+            'O': args.reduce_O,
+            'S': args.reduce_S,
+            'H': args.reduce_H
+        }
+
+        # Add component reduction info to output path
+        component_str = ''
+        if args.reduce_A:
+            component_str += 'A'
+        if args.reduce_O:
+            component_str += 'O'
+        if args.reduce_S:
+            component_str += 'S'
+        if args.reduce_H:
+            component_str += 'H'
+
+        if component_str:
+            args.output += f'_WO-{component_str}'
 
     args.output += '_TEST'
 
@@ -297,16 +627,36 @@ def main():
         end_date = datetime.datetime.strptime(args.end_date, '%Y%m%d')
         print(f"Ending at {end_date}")
 
-    files = glob(os.path.join(args.input,'*'))
+    files = glob(os.path.join(args.input, '*'))
 
-    dates_to_process = filter_files_by_date_range(files,args.start_date,args.end_date)
+    dates_to_process = filter_files_by_date_range(files, args.start_date, args.end_date)
 
     print(f"Processing {len(dates_to_process)} dates with max degree {args.max_degree}")
+
+    # Print component reduction info if applicable
+    if reduce_components:
+        component_list = [k for k, v in reduce_components.items() if v]
+        if component_list:
+            print(f"Reducing components: {', '.join(component_list)}")
+
+            # Check if component data files exist for the date range
+            for component in component_list:
+                if component in ['A', 'O', 'S', 'H']:
+                    comp_dir = f'DATA/DISPLACEMENTS/ESMGFZ_{component}_cf_IGSNET/TIME/'
+                    if not os.path.exists(comp_dir):
+                        print(f"Warning: Component directory {comp_dir} does not exist.")
+                    else:
+                        # Check for some example files
+                        example_files = glob(os.path.join(comp_dir, f'ESMGFZ_*_{component}_cf_DISP.PKL'))
+                        if example_files:
+                            print(f"Found {len(example_files)} files for component {component}")
+                        else:
+                            print(f"Warning: No files found for component {component} in {comp_dir}")
 
     # Process each date
     processed_dates = []
     for idx, filename in enumerate(dates_to_process):
-        date = pd.to_datetime(os.path.basename(filename).split('_')[1],format='%Y%m%d')
+        date = pd.to_datetime(os.path.basename(filename).split('_')[1], format='%Y%m%d')
         date_df = pd.read_pickle(filename)
         len_df = len(date_df)
 
@@ -340,6 +690,7 @@ def main():
                 print_maps=args.printmaps,
                 regularization=args.regularization,
                 add_helmert=False,
+                reduce_components=reduce_components,  # Add the component reduction parameter
             )
 
             if coeffs is not None:

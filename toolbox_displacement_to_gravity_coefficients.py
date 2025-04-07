@@ -685,26 +685,6 @@ def compute_gravity_field_coefficients(displacements, max_degree=60, love_number
             print("  - Reducing maximum degree")
             print("  - Adding regularization")
 
-    if save_summary:
-        if output_dir is None:
-            print("Warning: output_dir not specified, summary will not be saved")
-        else:
-            # Add reference frame to the result dictionary for inclusion in summary
-            final_result['reference_frame'] = reference_frame
-            final_result['max_degree'] = max_degree
-
-            # Save the summary
-            summary_files = save_processing_summary(
-                final_result,
-                output_dir=output_dir,
-                prefix=prefix,
-                identifier=identifier,
-                formats=['yaml']
-            )
-
-            # Add summary file paths to the result
-            final_result['summary_files'] = summary_files
-
     return final_result
 
 
@@ -1033,58 +1013,11 @@ def export_coefficients(coeffs, output_dir, prefix="gravity_coeffs", identifier=
         except Exception as e:
             print(f"Error using PyShTools to export potential coefficients: {e}")
 
-    # Export summary if error information is available
-    summary_file = None
-    if 'sigma_0_squared' in coeffs or 'residuals' in coeffs:
-        summary_file = os.path.join(output_dir, f"{file_prefix}_summary.txt")
-
-        with open(summary_file, 'w') as f:
-            f.write(f"# Spherical harmonic inversion summary\n")
-            f.write(f"Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Maximum degree: {max_degree}\n")
-
-            if 'rank' in coeffs:
-                f.write(f"Rank of design matrix: {coeffs['rank']}\n")
-
-            if 'sigma_0_squared' in coeffs:
-                f.write(f"Variance factor (sigma_0^2): {coeffs['sigma_0_squared']:.8e}\n")
-
-            if 'residuals' in coeffs:
-                f.write(f"RMS of residuals: {coeffs['residuals']:.8e} m\n\n")
-
-            # Add degree variance analysis if errors are available
-            if has_errors:
-                f.write("# Degree variance analysis\n")
-                f.write("# n load_power load_error_power SNR\n")
-
-                for n in range(1, max_degree + 1):
-                    # Calculate degree variance (power per degree)
-                    load_power = 0
-                    load_error = 0
-
-                    for m in range(n + 1):
-                        # Load coefficients power
-                        load_power += c_array[0, n, m] ** 2
-                        if m > 0:
-                            load_power += c_array[1, n, m] ** 2
-
-                        # Load coefficient errors power
-                        if has_errors:
-                            load_error += coeffs['load_errors'][0, n, m] ** 2
-                            if m > 0:
-                                load_error += coeffs['load_errors'][1, n, m] ** 2
-
-                    snr = np.sqrt(load_power / load_error) if load_error > 0 else float('inf')
-                    f.write(f"{n} {load_power:.8e} {load_error:.8e} {snr:.4f}\n")
-
-        print(f"Exported inversion summary to {summary_file}")
-
     return {
         'load_file': load_file,
         'potential_file': pot_file,
         'load_icgem_file': load_icgem_file,
-        'pot_icgem_file': pot_icgem_file,
-        'summary_file': summary_file
+        'pot_icgem_file': pot_icgem_file
     }
 
 
@@ -1285,6 +1218,9 @@ def save_processing_summary(coeffs, output_dir, prefix="gravity_coeffs", identif
             coeff_stats[f"degree_{n}"] = degree_coeffs
 
         summary["coefficient_statistics"] = coeff_stats
+
+    if 'rms_reduction' in coeffs:
+        summary["rms_information"] = coeffs['rms_reduction']
 
     # Export to different formats
     output_files = {}
