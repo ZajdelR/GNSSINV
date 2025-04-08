@@ -229,3 +229,7 @@ This toolkit was developed by Radoslaw Zajdel
 ## License
 
 This software is released under the MIT License.
+
+## Acknowledgements
+
+This work was supported by funding from the European Union's Horizon Europe program and the Central Bohemian Region through the Marie Skłodowska-Curie Actions - COFUND (Grant agreement ID: 101081195, "MERIT"). The views and opinions expressed herein are solely those of the authors and do not necessarily represent those of the European Union or the Central Bohemian Region. Neither the European Union nor the Central Bohemian Region bears responsibility for any views or information presented in this work.
