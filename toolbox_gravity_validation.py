@@ -69,7 +69,7 @@ def calculate_displacements_from_coefficients(coeffs, site_locations,
     k_n = ln['k_n']
 
     print(f"Using reference frame: {reference_frame}")
-    print(f"Degree-1 load Love numbers: h'₁={h_n[1]:.7f}, l'₁={l_n[1]:.7f}, k'₁={k_n[1]:.7f}")
+    print(f"Degree-1 load Love numbers: h'1={h_n[1]:.7f}, l'1={l_n[1]:.7f}, k'1={k_n[1]:.7f}")
 
     # Prepare result arrays
     n_sites = len(phi)

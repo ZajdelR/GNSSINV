@@ -57,7 +57,6 @@ def find_stations(solution, sampling):
 
     return sorted(stations)
 
-
 def process_station_wrapper(args):
     """
     Wrapper function to unpack arguments for process_station when using with ThreadPoolExecutor.
@@ -309,7 +308,6 @@ def reduce_components_from_data(sta, df, reduce_components, sampling):
 
     return df_red, components_name
 
-
 def create_comparison_data(sta, compare_components, sampling):
     """
     Create a comparison dataset by summing selected components.
@@ -442,7 +440,6 @@ def load_station_data(sta, sampling, solution):
             print(f"Error loading station data for {sta}: {str(e)}")
         return None
 
-
 def load_component_data(sta, component):
     """
     Load a specific loading component data for a station.
@@ -473,7 +470,6 @@ def load_component_data(sta, component):
         with print_lock:
             print(f"Error loading component {component} for station {sta}: {str(e)}")
         return None
-
 
 def calculate_statistics(df1, df2, common_dates):
     """
@@ -556,7 +552,6 @@ def calculate_statistics(df1, df2, common_dates):
         'num_points': len(common_dates)
     }
 
-
 def calculate_component_stds(sta, common_dates):
     """
     Calculate standard deviations for each individual component.
@@ -605,7 +600,6 @@ def calculate_component_stds(sta, common_dates):
                 print(f"Could not calculate standard deviation for component {component}: {str(e)}")
 
     return component_stds
-
 
 def create_comparison_plots(sta, df_common, comp_common, differences, stats, reduce_components_name,
                             compare_components_name, sampling, std_original_df):
@@ -982,14 +976,15 @@ def main():
     """Main function to process all stations with enhanced options for component handling."""
     # Parameters to customize analysis
     sampling = '01D'
-    solution = 'ITRF2020-ILRS-RES'
+    # solution = 'ITRF2020-IGS-RES'
+    solution = 'IGS1R03SNX'
 
     # Select which components to remove from the original data (set to True to remove)
     reduce_components = {
-        'A': 1,  # Atmospheric loading
-        'O': 1,  # Ocean loading
-        'S': 1,  # Surface water loading
-        'H': False   # Hydrological loading
+        'A': 0,  # Atmospheric loading
+        'O': 0,  # Ocean loading
+        'S': 0,  # Surface water loading
+        'H': 0   # Hydrological loading
     }
 
     # Select which components to include in the comparison sum (set to True to include)

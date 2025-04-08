@@ -110,8 +110,8 @@ def process_data(solution, sampling, start_date, end_date, add_periodic=True, lo
     logger.info(f"Add periodic signals: {add_periodic}")
 
     # Create output directories
-    out_dir_code = rf'DATA/DISPLACEMENTS/{solution}_{sampling}_2/CODE/'
-    out_dir_time = rf'DATA/DISPLACEMENTS/{solution}_{sampling}_2/TIME/'
+    out_dir_code = rf'DATA/DISPLACEMENTS/{solution}_{sampling}_NOPER/CODE/'
+    out_dir_time = rf'DATA/DISPLACEMENTS/{solution}_{sampling}_NOPER/TIME/'
     os.makedirs(out_dir_code, exist_ok=True)
     os.makedirs(out_dir_time, exist_ok=True)
     logger.info(f"Created output directories: {out_dir_code} and {out_dir_time}")
@@ -762,6 +762,6 @@ if __name__ == "__main__":
         sampling=sampling,
         start_date=start_date,
         end_date=end_date,
-        add_periodic=True,  # Set to False to skip periodic signal addition
+        add_periodic=False,  # Set to False to skip periodic signal addition
         log_level=logging.INFO  # Use logging.DEBUG for more verbose output
     )

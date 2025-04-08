@@ -527,7 +527,7 @@ def main():
     import gc
     from glob import glob
     default_solution = ''
-    # default_solution = 'ESMGFZ_H_cf_GRIDS'
+    default_solution = 'ESMGFZ_LSDM_cf_GRIDS'
     # default_solution = 'ESMGFZ_H_cf_IGSNET'
     # default_solution = 'IGS1R03SNX_01D'
     # default_solution = 'ITRF2020-IGS-RES_01D'
@@ -549,7 +549,7 @@ def main():
                         help='Maximum spherical harmonic degree')
     parser.add_argument('--frame', type=str, default='CF',
                         help='Displacement frame')
-    parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD)', default='20180102')
+    parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD)', default='20180101')
     parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD)', default='20180102')
     parser.add_argument('--limit_stations', action='store_true', default=False,
                         help='Use only datum stations')
@@ -576,8 +576,8 @@ def main():
 
     args = parser.parse_args()
 
-    args.input = rf'DATA/DISPLACEMENTS/{args.solution}/TIME/'
-    args.output = f'OUTPUT/{args.solution}'
+    args.input = os.path.join('DATA','DISPLACEMENTS',args.solution,'TIME')
+    args.output = os.path.join('OUTPUT',args.solution)
 
     print(f"Loading apriori station coordinates from {args.latlon}...")
     lat_lon = pd.read_pickle(args.latlon)
@@ -633,11 +633,12 @@ def main():
         end_date = datetime.datetime.strptime(args.end_date, '%Y%m%d')
         print(f"Ending at {end_date}")
 
+    print(args.input)
     files = glob(os.path.join(args.input, '*'))
 
     dates_to_process = filter_files_by_date_range(files, args.start_date, args.end_date)
 
-    print(f"Processing {len(dates_to_process)} dates with max degree {args.max_degree}")
+    print(f"Processing {len(dates_to_process)}/{len(files)} dates with max degree {args.max_degree}")
 
     # Print component reduction info if applicable
     if reduce_components:

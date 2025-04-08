@@ -444,7 +444,7 @@ def process_displacement_files(input_dir, output_dir=None, solution_name=None, s
             return [], []
 
     # Create the output directory structure for TIME series
-    time_output_dir = os.path.join(output_dir, "DATA", "DISPLACEMENTS", solution_name + f"_{sampling}_NOPER", 'TIME')
+    time_output_dir = os.path.join(output_dir, "DATA", "DISPLACEMENTS", solution_name + f"_{sampling}", 'TIME')
     os.makedirs(time_output_dir, exist_ok=True)
     logger.info(f"Created output directory for TIME series: {time_output_dir}")
 
@@ -534,7 +534,7 @@ def main():
                         default=None)
     parser.add_argument('--sampling', help='Sampling rate (default: 01D)', default='01D')
     parser.add_argument('--threads', type=int, help='Number of threads to use (default: CPU count)', default=None)
-    parser.add_argument('--add_periodic', action='store_true', help='Add periodic signals to the data', default=False)
+    parser.add_argument('--add_periodic', action='store_true', help='Add periodic signals to the data', default=True)
     parser.add_argument('--cpy1_file', help='Path to the ITRF2020-1cpy-ENU-CF.dat file (annual signal)',
                         default='EXT/ITRF_PERIODIC_MODEL/ITRF2020-1cpy-ENU-CF.dat')
     parser.add_argument('--cpy2_file', help='Path to the ITRF2020-2cpy-ENU-CF.dat file (semi-annual signal)',

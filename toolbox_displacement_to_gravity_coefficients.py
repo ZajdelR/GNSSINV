@@ -369,9 +369,9 @@ def calculate_load_coefficients(displacements, max_degree=6, love_numbers_file=N
     transformed_love_numbers = transform_love_numbers(love_numbers, reference_frame)
 
     print(f"Using reference frame: {reference_frame}")
-    print(f"Degree-1 load Love numbers: h'₁={transformed_love_numbers['h_n'][1]:.7f}, "
-          f"l'₁={transformed_love_numbers['l_n'][1]:.7f}, "
-          f"k'₁={transformed_love_numbers['k_n'][1]:.7f}")
+    print(rf"Degree-1 load Love numbers: h'1={transformed_love_numbers['h_n'][1]:.7f}, "
+          rf"l'1={transformed_love_numbers['l_n'][1]:.7f}, "
+          rf"k'1={transformed_love_numbers['k_n'][1]:.7f}")
 
     # Number of sites
     n_sites = len(lats)

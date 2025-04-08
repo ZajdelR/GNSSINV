@@ -661,8 +661,9 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
 # Example usage
 if __name__ == "__main__":
     solution = 'ITRF2020-IGS-RES'
+    # solution = 'IGS1R03SNX'
     sampling = '01D'
-    reduction = 'AOS'
+    reduction = 'None'
     vs = 'H'
 
     # Example usage with default directory
@@ -670,7 +671,7 @@ if __name__ == "__main__":
     output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS")
     min_num_points = 1000
     min_h_std = 1.5  # 1.5 mm minimum standard deviation for H component
-    pattern = f'*_WO-{reduction}_VS_{vs}*.PKL'
+    pattern = f'*_WO-{reduction}_VS_SUM-{vs}*.PKL'
 
     print(f"Using parameters: min_num_points={min_num_points}, min_h_std={min_h_std}")
     print(f"Pattern: {pattern}")

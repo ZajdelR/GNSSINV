@@ -15,6 +15,7 @@ The project consists of several Python scripts for different processing steps:
 ### Displacement Calculation
 
 - `02_displacements_from_snx_est_apr.py`: Computes displacements by comparing estimated and a priori coordinates, transforms from ECEF to topocentric coordinates, and optionally adds periodic signals.
+  - TODO: The script should retrieve the displacements solely based on the estimates.
 - `02_displacements_from_esmgfz_nc_grids.py`: Converts NetCDF grid files to daily displacement dataframes with specific grid resolution.
 
 ### Loading Model Integration
@@ -29,8 +30,11 @@ The project consists of several Python scripts for different processing steps:
 ### Gravity Field Inversion
 
 - `05_displacement_inversion.py`: Converts displacement data to spherical harmonic coefficients and computes gravity field variations.
+  - TODO: Incorporate weight information
+  - TODO: Process displacements in windows of n days
 
 ### Coefficient Analysis
+ - TODO: Analysis of summary files
 
 - `06_analysis_gfc_c20c30.py`: Analyzes temporal variations in key coefficients (C20, C30) and compares with reference solutions.
 - `06_analysis_gfc_degree1.py`: Analyzes degree-1 coefficients (geocenter motion) from different solutions.
