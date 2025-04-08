@@ -667,16 +667,19 @@ def main():
         len_df = len(date_df)
 
         if args.limit_stations:
-            stations_for_date = station_availability.loc[date.date()].dropna()
-            len_df_snx = len(stations_for_date)
-            if args.only_datum:
-                stations_for_date = stations_for_date[stations_for_date == 1]
+            try:
+                stations_for_date = station_availability.loc[date.date()].dropna()
+                len_df_snx = len(stations_for_date)
+                if args.only_datum:
+                    stations_for_date = stations_for_date[stations_for_date == 1]
 
-            len_df_snx_2 = len(stations_for_date)
+                len_df_snx_2 = len(stations_for_date)
 
-            print(f'Number of stations: {len_df} -> {len_df_snx} -> {len_df_snx_2}')
+                print(f'Number of stations: {len_df} -> {len_df_snx} -> {len_df_snx_2}')
 
-            date_df = date_df.loc[date_df.index.get_level_values('CODE').isin(stations_for_date.index)]
+                date_df = date_df.loc[date_df.index.get_level_values('CODE').isin(stations_for_date.index)]
+            except:
+                print('Failed to get station availability information')
         else:
             print(f'Number of stations: {len_df}')
 

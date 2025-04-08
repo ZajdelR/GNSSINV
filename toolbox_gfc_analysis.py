@@ -588,16 +588,16 @@ def plot_geocenter_motion(solutions_dict, coeff_columns=['X', 'Y', 'Z'],
 
     return fig, time_axes, ls_axes
 
-def get_geocenter_motion(solution, degree, date_start, date_end, base_dir):
+def get_geocenter_motion(solution, degmax, date_start, date_end, base_dir):
 
     degree1_z = create_coefficient_time_series(base_dir,
-                                             solution=solution, degmax=degree,
-                                             coeff_type='load', degree=1, order=0,
-                                             start_date=date_start,end_date=date_end)
+                                               solution=solution, degmax=degmax,
+                                               coeff_type='load', degree=1, order=0,
+                                               start_date=date_start, end_date=date_end)
     degree1_xy = create_coefficient_time_series(base_dir,
-                                             solution=solution, degmax=degree,
-                                             coeff_type='load', degree=1, order=1,
-                                             start_date=date_start,end_date=date_end)
+                                                solution=solution, degmax=degmax,
+                                                coeff_type='load', degree=1, order=1,
+                                                start_date=date_start, end_date=date_end)
 
     degree1_z.rename({'C':'C10','C_error':'C10_error'},axis=1,inplace=True)
     degree1_z.drop(['S','S_error'],axis=1,inplace=True)

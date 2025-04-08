@@ -174,7 +174,7 @@ if __name__ == "__main__":
     OUTPUT_RESOLUTION = 7.5
     OUTPUT_DIR = f"DATA/DISPLACEMENTS/{MODEL_OUTPUTNAME}_GRIDS/TIME/"  # Replace with your output directory
 
-    for YEAR in range(2015, 2023):
+    for YEAR in range(2023, 2024):
         # Call the function
         output_files = convert_nc_to_daily_df(
             source_dir=SOURCE_DIR,
