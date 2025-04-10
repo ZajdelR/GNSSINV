@@ -559,7 +559,7 @@ def main():
                         help='Use VCE for adding error information') ## Doesnt work
     parser.add_argument('--errors', action='store_true', default=True,
                         help='Calculate formal errors')
-    parser.add_argument('--printmaps', action='store_true', default=False,
+    parser.add_argument('--printmaps', action='store_true', default=True,
                         help='Print Maps')
     parser.add_argument('--regularization', action='store_true', default=False,
                         help='Use regularization')
