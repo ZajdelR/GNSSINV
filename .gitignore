@@ -4,4 +4,10 @@
 /EXT/AOD1B/
 /EXT/ESMGFZLOADING/
 /OUTPUT/*
-
+/LOGS/*
+/TEMP/
+/OUTPUT_PLOTS/*
+/comparison_results/
+/DATA/SNX_VEL/
+/visualize_grid_displacements.py
+/xx_run_inversion.py

@@ -43,12 +43,12 @@ c20 = gcc.resample_and_interpolate(c20,'1D')
 
 c20_stats = plot_series_with_lombscargle(c20,'C',title='C20',units='',
                                          apply_lowpass_filter=apply_lowpass_filter,
-                                         save_path=f'OUTPUT_PLOTS/C20_comparison{suffix}.png',
+                                         save_path=f'OUTPUT_PLOTS/20250409/C20_comparison{suffix}.png',
                                          y_offset=3e-10,
                                          width_cm=13,figsize=(1,1.5))
 
 c20_signal = gcc.fit_and_provide_annual_semiannual_table_with_errors(c20,['C'])
-plot_phasors(c20_signal,'C',width_cm=13,save_path=f'OUTPUT_PLOTS/C20_phasor{suffix}.png')
+plot_phasors(c20_signal,'C',width_cm=13,save_path=f'OUTPUT_PLOTS/20250409/C20_phasor{suffix}.png')
 
 c30 = {}
 kwargs = dict(coeff_type='potential', base_dir='OUTPUT', degree=3, order=0,
@@ -82,12 +82,12 @@ c30 = gcc.resample_and_interpolate(c30,'1D')
 
 c30_stats = plot_series_with_lombscargle(c30,'C',title='C30',units='',
                                          apply_lowpass_filter=apply_lowpass_filter,
-                                         save_path=f'OUTPUT_PLOTS/C30_comparison{suffix}.png',
+                                         save_path=f'OUTPUT_PLOTS/20250409/C30_comparison{suffix}.png',
                                          y_offset=3e-10,
                                          width_cm=13,figsize=(1,1.5))
 
 c30_signal = gcc.fit_and_provide_annual_semiannual_table_with_errors(c30,['C'])
-plot_phasors(c30_signal,'C',width_cm=13,save_path=f'OUTPUT_PLOTS/C30_phasor{suffix}.png')
+plot_phasors(c30_signal,'C',width_cm=13,save_path=f'OUTPUT_PLOTS/20250409/C30_phasor{suffix}.png')
 #
 # c20_load = {}
 # kwargs['coeff_type'] = 'load'

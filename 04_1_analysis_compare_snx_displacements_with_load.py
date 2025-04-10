@@ -71,16 +71,16 @@ def process_station_wrapper(args):
     tuple
         (station_name, result) or (station_name, None) if processing failed
     """
-    sta, sampling, solution, reduce_components, compare_components = args
+    sta, sampling, solution, reduce_components, compare_components, start_date, end_date = args
     try:
-        result = process_station(sta, sampling, solution, reduce_components, compare_components)
+        result = process_station(sta, sampling, solution, reduce_components, compare_components, start_date, end_date)
         return (sta, result)
     except Exception as e:
         with print_lock:
             print(f"Error processing station {sta}: {str(e)}")
         return (sta, None)
 
-def process_station(sta, sampling, solution, reduce_components, compare_components):
+def process_station(sta, sampling, solution, reduce_components, compare_components, start_date=None, end_date=None):
     """
     Process a single station and create comparison plots.
 
@@ -125,6 +125,24 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
     comp_df, compare_components_name = create_comparison_data(sta, compare_components, sampling)
     if comp_df is None:
         return None
+
+    # Filter data by date range if specified
+    if start_date is not None:
+        df_red = df_red[df_red.index >= start_date]
+        with print_lock:
+            print(f"Filtered df_red from {start_date}, {len(df_red)} points remain")
+
+    if end_date is not None:
+        df_red = df_red[df_red.index <= end_date]
+        with print_lock:
+            print(f"Filtered df_red until {end_date}, {len(df_red)} points remain")
+
+    # Do the same for the comparison dataset
+    if start_date is not None and comp_df is not None:
+        comp_df = comp_df[comp_df.index >= start_date]
+
+    if end_date is not None and comp_df is not None:
+        comp_df = comp_df[comp_df.index <= end_date]
 
     # Find common dates between df_red and comp_df
     common_dates = df_red.index.intersection(comp_df.index)
@@ -354,6 +372,18 @@ def create_comparison_data(sta, compare_components, sampling):
         if os.path.exists(file_path):
             files.append(file_path)
             component_labels.append('H')
+
+    if compare_components['M']:
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_M_cf.PKL'
+        if os.path.exists(file_path):
+            files.append(file_path)
+            component_labels.append('M')
+
+    if compare_components['L']:
+        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_L_cf.PKL'
+        if os.path.exists(file_path):
+            files.append(file_path)
+            component_labels.append('L')
 
     # Load and combine selected components
     if files:
@@ -668,10 +698,10 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, red
 
     # Time series subplot (upper left, 2/3 width)
     ax_timeseries = fig.add_subplot(gs[0, 0])
-    ax_timeseries.plot(df_common.index, df_common['dU'], '-', linewidth=0.5,
-                       label=f'df-{reduce_components_name} dU', color='blue', alpha=0.7, markersize=0)
-    ax_timeseries.plot(comp_common.index, comp_common['dU'], '--', linewidth=0.5,
-                       label=f'{compare_components_name} dU', color='red', alpha=0.7, markersize=0)
+    ax_timeseries.plot(df_common.index, df_common['dU'], '-', linewidth=1,
+                       label=f'df-{reduce_components_name} dU', color='blue', alpha=1, markersize=0)
+    ax_timeseries.plot(comp_common.index, comp_common['dU'], '-', linewidth=1,
+                       label=f'{compare_components_name} dU', color='red', alpha=0.5, markersize=0)
 
     # Find min and max values for setting symmetric ylim rounded to nearest multiple of 5
     all_values = np.concatenate([df_common['dU'].dropna().values, comp_common['dU'].dropna().values])
@@ -826,8 +856,8 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, red
             print(f"Semi-annual amplitude: {amplitude1[semiannual_idx]:.2f} mm, {amplitude2[semiannual_idx]:.2f} mm")
 
         # Plot the periodograms
-        ax_lomb.plot(period, amplitude1, '-', color='blue', alpha=0.7, label=f'df-{reduce_components_name}')
-        ax_lomb.plot(period, amplitude2, '-', color='red', alpha=0.7, label=f'{compare_components_name}')
+        ax_lomb.plot(period, amplitude1, '-', color='blue', alpha=1, linewidth=1, label=f'df-{reduce_components_name}')
+        ax_lomb.plot(period, amplitude2, '-', color='red', alpha=0.5, linewidth=1, label=f'{compare_components_name}')
         ax_lomb.set_xlabel('Period (days)', fontsize=10, labelpad=8)
         ax_lomb.set_ylabel('Amplitude (mm)', fontsize=10)
         ax_lomb.set_title('Lomb-Scargle Periodogram')
@@ -989,14 +1019,16 @@ def main():
 
     # Select which components to include in the comparison sum (set to True to include)
     compare_components = {
-        'A': 0,   # Atmospheric loading
+        'A': 0,  # Atmospheric loading
         'O': 0,  # Ocean loading
         'S': 0,  # Surface water loading
-        'H': 1   # Hydrological loading
+        'H': 1,  # Hydrological loading old LSDM
+        'L': 0,  # Hydrological loading Lisflood
+        'M': 0,  # Hydrological loading LSDM
     }
 
     # Determine the number of workers (threads)
-    max_workers = max(1, os.cpu_count() - 1)
+    max_workers = 1#max(1, os.cpu_count() - 1)
 
     # Check if specific stations are provided as command line arguments
     if len(sys.argv) > 1:
@@ -1005,9 +1037,12 @@ def main():
             print(f"Processing specified stations: {', '.join(stations)}")
     else:
         # Find all available stations
-        stations = find_stations(solution, sampling)
+        stations = find_stations(solution, sampling)[978:]
         with print_lock:
             print(f"Found {len(stations)} stations: {', '.join(stations)}")
+
+    start_date = datetime.date(2000,1,1)  # Set to a date like datetime.date(2010, 1, 1) to specify
+    end_date = datetime.date(2020,12,31)   # Set to a date like datetime.date(2015, 12, 31) to specify
 
     # Prepare output directory
     reduce_str = "".join([k for k, v in reduce_components.items() if v])
@@ -1027,8 +1062,9 @@ def main():
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Create arguments for each station
-        args_list = [(sta, sampling, solution, reduce_components, compare_components) for sta in stations]
-
+        # Create arguments for each station
+        args_list = [(sta, sampling, solution, reduce_components, compare_components, start_date, end_date) for sta in
+                     stations]
         # Submit all tasks and get Future objects
         future_to_station = {
             executor.submit(process_station_wrapper, args): args[0]

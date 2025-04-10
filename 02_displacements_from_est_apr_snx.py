@@ -110,8 +110,8 @@ def process_data(solution, sampling, start_date, end_date, add_periodic=True, lo
     logger.info(f"Add periodic signals: {add_periodic}")
 
     # Create output directories
-    out_dir_code = rf'DATA/DISPLACEMENTS/{solution}_{sampling}_NOPER/CODE/'
-    out_dir_time = rf'DATA/DISPLACEMENTS/{solution}_{sampling}_NOPER/TIME/'
+    out_dir_code = rf'DATA/DISPLACEMENTS/{solution}_{sampling}/CODE/'
+    out_dir_time = rf'DATA/DISPLACEMENTS/{solution}_{sampling}/TIME/'
     os.makedirs(out_dir_code, exist_ok=True)
     os.makedirs(out_dir_time, exist_ok=True)
     logger.info(f"Created output directories: {out_dir_code} and {out_dir_time}")
@@ -179,6 +179,8 @@ def process_data(solution, sampling, start_date, end_date, add_periodic=True, lo
     logger.info(f"Processing {len(dfsta)} unique stations")
 
     results = []
+    skipped_stations = []
+
     for sta, df in dfsta:
         logger.info(f"Processing station {sta} with {len(df)} records")
 
@@ -220,16 +222,23 @@ def process_data(solution, sampling, start_date, end_date, add_periodic=True, lo
             try:
                 logger.info(f"Adding periodic signals in topocentric domain for station {sta}")
                 # Load the ENU periodic model files instead of XYZ
-                df_processed = add_periodic_signals_enu(
+                df_processed, has_periodic = add_periodic_signals_enu(
                     df_with_topo,
                     'EXT/ITRF_PERIODIC_MODEL/ITRF2020-1cpy-ENU-CF.dat',  # Use ENU file instead of XYZ
                     'EXT/ITRF_PERIODIC_MODEL/ITRF2020-2cpy-ENU-CF.dat',  # Use ENU file instead of XYZ
                     station_code=sta,
                     logger=logger
                 )
+
+                if not has_periodic:
+                    logger.warning(f"No periodic signals found for station {sta}, skipping this station")
+                    skipped_stations.append(sta)
+                    continue
+
             except Exception as e:
                 logger.error(f"Error adding periodic signals for station {sta}: {e}")
-                df_processed = df_with_topo  # Use topo data without periodic if error occurs
+                skipped_stations.append(sta)
+                continue  # Use topo data without periodic if error occurs
         else:
             logger.info(f"Skipping periodic signal addition for station {sta} as requested")
             df_processed = df_with_topo
@@ -275,6 +284,9 @@ def process_data(solution, sampling, start_date, end_date, add_periodic=True, lo
     except Exception as e:
         logger.error(f"Error in final data processing: {e}")
         raise
+
+    if skipped_stations:
+        logger.warning(f"Skipped {len(skipped_stations)} stations: {', '.join(skipped_stations)}")
 
 
 def add_periodic_signals(df, cpy1_file, cpy2_file, station_code=None, reference_epoch='2015-01-01 00:00', logger=None):
@@ -678,6 +690,8 @@ def add_periodic_signals_enu(df, cpy1_file, cpy2_file, station_code=None, refere
     # Create a copy to hold the result
     output_df = pd.DataFrame()
 
+    has_periodic_signals = False
+
     # Process each SOLN group separately
     log.info(f"Processing {len(result_df['SOLN'].unique())} unique SOLN values")
     for soln, group_df in result_df.groupby('SOLN'):
@@ -695,6 +709,8 @@ def add_periodic_signals_enu(df, cpy1_file, cpy2_file, station_code=None, refere
             # Keep original data for this group without changes
             output_df = pd.concat([output_df, temp_df])
             continue
+
+        has_periodic_signals = True
 
         # Calculate time difference from reference epoch in days
         temp_df['days_since_ref'] = (temp_df['EPOCH'] - ref_epoch).dt.total_seconds() / (24 * 3600)
@@ -745,7 +761,7 @@ def add_periodic_signals_enu(df, cpy1_file, cpy2_file, station_code=None, refere
 
     log.info(f"Completed adding periodic signals in ENU for station {station_code}")
     # Return the combined result with index reset
-    return output_df.reset_index(drop=True)
+    return output_df.reset_index(drop=True), has_periodic_signals
 
 if __name__ == "__main__":
     # Example usage
@@ -762,6 +778,6 @@ if __name__ == "__main__":
         sampling=sampling,
         start_date=start_date,
         end_date=end_date,
-        add_periodic=False,  # Set to False to skip periodic signal addition
+        add_periodic=True,  # Set to False to skip periodic signal addition
         log_level=logging.INFO  # Use logging.DEBUG for more verbose output
     )

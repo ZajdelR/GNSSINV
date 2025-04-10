@@ -46,11 +46,11 @@ def load_station_results(comp_dir, pattern='*_WO-*_VS_*.PKL', exclude_pattern='*
                 data = pd.read_pickle(file_path)
                 compiled_data[sta] = data
 
-                if sum_components is None and 'sum_components' in data:
-                    sum_components = data['sum_components']
+                if sum_components is None and 'reduce_components' in data:
+                    sum_components = data['reduce_components']
 
-                if compare_with is None and 'compare_with' in data:
-                    compare_with = data['compare_with']
+                if compare_with is None and 'compare_components' in data:
+                    compare_with = data['compare_components']
 
                 print(f"Loaded data for station {sta}")
 
@@ -76,7 +76,7 @@ def extract_statistics_for_mapping(compiled_data, min_num_points=30, min_h_std=0
             if 'individual_components' in std_devs and 'H' in std_devs['individual_components']:
                 h_std = std_devs['individual_components']['H']
             else:
-                compare_with = data.get('compare_with', '')
+                compare_with = data.get('compare_components', '')
                 if compare_with == 'H':
                     h_std = std_devs.get('comparison_component', 0.0)
 
@@ -93,6 +93,7 @@ def extract_statistics_for_mapping(compiled_data, min_num_points=30, min_h_std=0
                 'num_points': num_points,
                 'std_original': std_devs['original_df'],
                 'std_reduced': std_devs['df_reduced'],
+                'std_reduction': ((std_devs['df_reduced']-stats['std'])/std_devs['df_reduced']),
                 'std_comparison': std_devs['comparison_component'],
                 'std_components': std_devs['individual_components'],
                 'h_std': h_std
@@ -275,7 +276,7 @@ def visualize_variance_explained_map(comp_dir, output_dir=None, pattern='*_WO-*_
         f"Range: {plot_df['variance_explained'].min():.2f}% - {plot_df['variance_explained'].max():.2f}%"
     )
 
-    plt.figtext(0.02, 0.02, stats_text, fontsize=10,
+    plt.figtext(0.02, 0.1, stats_text, fontsize=10,
                 bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
 
     ax.legend(loc='lower right', fontsize=8)
@@ -439,7 +440,7 @@ def create_variance_ratio_map(comp_dir, output_dir=None, pattern='*_WO-*_VS_*.PK
         f"Range: {plot_df['variance_ratio'].min():.2f}% - {plot_df['variance_ratio'].max():.2f}%"
     )
 
-    plt.figtext(0.02, 0.02, stats_text, fontsize=10,
+    plt.figtext(0.02, 0.1, stats_text, fontsize=10,
                 bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
 
     ax.legend(loc='lower right', fontsize=8)
@@ -589,7 +590,7 @@ def create_correlation_map(comp_dir, value_to_plot, output_dir=None, pattern='*_
         f"Range: {plot_df[value_to_plot].min():.2f} - {plot_df[value_to_plot].max():.2f}"
     )
 
-    plt.figtext(0.02, 0.02, stats_text, fontsize=10,
+    plt.figtext(0.02, 0.1, stats_text, fontsize=10,
                 bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
 
     ax.legend(loc='lower right', fontsize=8)
@@ -660,17 +661,17 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
 
 # Example usage
 if __name__ == "__main__":
-    solution = 'ITRF2020-IGS-RES'
-    # solution = 'IGS1R03SNX'
+    # solution = 'ITRF2020-IGS-RES'
+    solution = 'IGS1R03SNX'
     sampling = '01D'
-    reduction = 'None'
+    reduction = 'AOS'
     vs = 'H'
 
     # Example usage with default directory
     comp_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL'
     output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS")
     min_num_points = 1000
-    min_h_std = 1.5  # 1.5 mm minimum standard deviation for H component
+    min_h_std = 2.0  # 1.5 mm minimum standard deviation for H component
     pattern = f'*_WO-{reduction}_VS_SUM-{vs}*.PKL'
 
     print(f"Using parameters: min_num_points={min_num_points}, min_h_std={min_h_std}")
@@ -679,24 +680,26 @@ if __name__ == "__main__":
 
     # Create the variance explained map
     fig1, plot_df1 = visualize_variance_explained_map(comp_dir, output_dir, pattern, min_num_points, min_h_std, cmap='Greens')
-
-    # Create the variance ratio map
+    #
+    # # Create the variance ratio map
     fig2, plot_df2 = create_variance_ratio_map(comp_dir, output_dir, pattern, min_num_points, min_h_std)
 
     # Create the correlation map
     fig3, plot_df3 = create_correlation_map(comp_dir, 'correlation', output_dir, pattern, min_num_points, min_h_std, cmap='coolwarm')
     fig3a, plot_df3a = create_correlation_map(comp_dir, 'kge2012', output_dir, pattern, min_num_points, min_h_std, cmap='coolwarm')
+    fig3b, plot_df3b = create_correlation_map(comp_dir, 'std_reduction', output_dir, pattern, min_num_points, min_h_std,
+                                              cmap='coolwarm')
 
     # Determine sum_components, compare_with, solution from the data
     compiled_data, sum_components, compare_with, solution = load_station_results(comp_dir, pattern)
     #
     # # Create bar plot for top stations with highest variance explained
-    fig4 = create_top_stations_bar_plot(plot_df1, metric='variance_explained', top_percent=10,
+    fig4 = create_top_stations_bar_plot(plot_df1, metric='variance_explained', top_percent=5,
                                         output_dir=output_dir, solution=solution,
                                         sum_components=sum_components, compare_with=compare_with)
 
     # # Create bar plot for top stations with highest correlation
-    fig5 = create_top_stations_bar_plot(plot_df3, metric='correlation', top_percent=10,
+    fig5 = create_top_stations_bar_plot(plot_df3, metric='correlation', top_percent=5,
                                         output_dir=output_dir, solution=solution,
                                         sum_components=sum_components, compare_with=compare_with)
 

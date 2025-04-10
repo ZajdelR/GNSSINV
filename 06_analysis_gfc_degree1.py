@@ -47,33 +47,33 @@ gcc = gcc_analysis_tools.resample_and_interpolate(gcc,'1D')
 
 gcc_stats = plot_series_with_lombscargle(gcc,'Z',title='Z',units='mm',
                                          apply_lowpass_filter=apply_lowpass_filter,
-                                         save_path=f'OUTPUT_PLOTS/Z_comparison{suffix}.png',
+                                         save_path=f'OUTPUT_PLOTS/20250409/Z_comparison{suffix}.png',
                                          y_offset=20, periodogram_offset=0,
                                          width_cm=13,figsize=(1,1.5))
 
 gcc_stats = plot_series_with_lombscargle(gcc,'C10',title='C10',units='kg/m2',
                                          apply_lowpass_filter=apply_lowpass_filter,
-                                         save_path=f'OUTPUT_PLOTS/C10_comparison{suffix}.png',
+                                         save_path=f'OUTPUT_PLOTS/20250409/C10_comparison{suffix}.png',
                                          y_offset=100, periodogram_offset=0,
                                          width_cm=13,figsize=(1,1.5))
 
 gcc_stats = plot_series_with_lombscargle(gcc,'Y',title='Y',units='mm',
                                          apply_lowpass_filter=apply_lowpass_filter,
-                                         save_path=f'OUTPUT_PLOTS/Y_comparison{suffix}.png',
+                                         save_path=f'OUTPUT_PLOTS/20250409/Y_comparison{suffix}.png',
                                          y_offset=10, periodogram_offset=0,
                                          width_cm=13,figsize=(1,1.5))
 
 gcc_stats = plot_series_with_lombscargle(gcc,'X',title='X',units='mm',
                                          apply_lowpass_filter=apply_lowpass_filter,
-                                         save_path=f'OUTPUT_PLOTS/X_comparison{suffix}.png',
+                                         save_path=f'OUTPUT_PLOTS/20250409/X_comparison{suffix}.png',
                                          y_offset=10, periodogram_offset=0,
                                          width_cm=13,figsize=(1,1.5))
 
 gcc_stats_df = pd.DataFrame(gcc_stats)
 
 annual_semiannual = gcc_analysis_tools.fit_and_provide_annual_semiannual_table_with_errors(gcc,['C11','S11','C10','X','Y','Z'])
-annual_semiannual = annual_semiannual.sort_values(['Component','Dataset'])
+# annual_semiannual = annual_semiannual.sort_values(['Component','Dataset'])
 
-plot_phasors(annual_semiannual,'Z',width_cm=13,save_path=f'OUTPUT_PLOTS/Z_phasor{suffix}.png')
-plot_phasors(annual_semiannual,'Y',width_cm=13,save_path=f'OUTPUT_PLOTS/X_phasor{suffix}.png')
-plot_phasors(annual_semiannual,'X',width_cm=13,save_path=f'OUTPUT_PLOTS/Y_phasor{suffix}.png')
+plot_phasors(annual_semiannual,'Z',width_cm=13,save_path=f'OUTPUT_PLOTS/20250409/Z_phasor{suffix}.png')
+plot_phasors(annual_semiannual,'Y',width_cm=13,save_path=f'OUTPUT_PLOTS/20250409/X_phasor{suffix}.png')
+plot_phasors(annual_semiannual,'X',width_cm=13,save_path=f'OUTPUT_PLOTS/20250409/Y_phasor{suffix}.png')

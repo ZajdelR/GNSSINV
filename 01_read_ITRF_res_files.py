@@ -85,8 +85,9 @@ def add_periodic_signals(df, cpy1_file, cpy2_file, station_code=None, reference_
 
     Returns:
     --------
-    pandas.DataFrame
-        DataFrame with updated dE, dN, dU columns that include the periodic signals
+    pandas.DataFrame or None
+        DataFrame with updated dE, dN, dU columns that include the periodic signals,
+        or None if no periodic signals were found for this station
     """
     # Use provided logger or create a simple one if not provided
     log = logger or logging.getLogger(__name__)
@@ -127,6 +128,14 @@ def add_periodic_signals(df, cpy1_file, cpy2_file, station_code=None, reference_
     coef_1cpy.columns = ['CODE', 'X', 'DOMES', 'SOLN', 'COMP', 'COSX', 'COSX_ERROR', 'SINX', 'SINX_ERROR']
     coef_2cpy.columns = ['CODE', 'X', 'DOMES', 'SOLN', 'COMP', 'COSX', 'COSX_ERROR', 'SINX', 'SINX_ERROR']
 
+    # Check if there are any coefficients for this station at all
+    station_coef_1cpy = coef_1cpy[coef_1cpy['CODE'] == station_code]
+    station_coef_2cpy = coef_2cpy[coef_2cpy['CODE'] == station_code]
+
+    if station_coef_1cpy.empty and station_coef_2cpy.empty:
+        log.warning(f"No coefficients found for station code '{station_code}' in either coefficient file")
+        return None  # Return None to indicate no periodic signals were found
+
     # Create a copy to hold the result
     output_df = pd.DataFrame()
 
@@ -136,6 +145,9 @@ def add_periodic_signals(df, cpy1_file, cpy2_file, station_code=None, reference_
 
     # Reset index for easier manipulation
     temp_df = result_df.reset_index()
+
+    # Flag to check if at least one SOLN has coefficients
+    any_soln_has_coefficients = False
 
     # Group by SOLN
     for soln, group_df in temp_df.groupby('SOLN'):
@@ -153,6 +165,9 @@ def add_periodic_signals(df, cpy1_file, cpy2_file, station_code=None, reference_
             # Keep original data for this group without changes
             output_df = pd.concat([output_df, soln_df])
             continue
+
+        # Mark that we found at least one SOLN with coefficients
+        any_soln_has_coefficients = True
 
         # Calculate time difference from reference epoch in days
         soln_df['days_since_ref'] = (pd.to_datetime(soln_df['EPOCH']) - ref_epoch).dt.total_seconds() / (24 * 3600)
@@ -200,6 +215,11 @@ def add_periodic_signals(df, cpy1_file, cpy2_file, station_code=None, reference_
         # Add this processed group to the output
         output_df = pd.concat([output_df, soln_df])
         log.info(f"Completed processing for SOLN {soln}")
+
+    # Check if we processed at least one SOLN with coefficients
+    if not any_soln_has_coefficients:
+        log.warning(f"No periodic signals were added for any SOLN for station {station_code}")
+        return None  # Return None to indicate no periodic signals were found
 
     log.info(f"Completed adding periodic signals for station {station_code}")
 
@@ -322,7 +342,7 @@ def process_station(station, input_dir, output_dir, solution_name, sampling, add
         if add_periodic and cpy1_file and cpy2_file:
             logger.info(f"Adding periodic signals for station {station_code}")
             try:
-                merged_df = add_periodic_signals(
+                result_df = add_periodic_signals(
                     merged_df,
                     cpy1_file=cpy1_file,
                     cpy2_file=cpy2_file,
@@ -330,6 +350,13 @@ def process_station(station, input_dir, output_dir, solution_name, sampling, add
                     reference_epoch=reference_epoch,
                     logger=logger
                 )
+
+                # Check if periodic signals were found and applied
+                if result_df is None:
+                    logger.warning(f"No periodic signals found for station {station_code}, skipping this station.")
+                    return None
+
+                merged_df = result_df
                 logger.info(f"Successfully added periodic signals for station {station_code}")
             except Exception as e:
                 logger.error(f"Error adding periodic signals for station {station_code}: {str(e)}")
@@ -353,7 +380,6 @@ def process_station(station, input_dir, output_dir, solution_name, sampling, add
     except Exception as e:
         logger.error(f"Error processing station {station}: {str(e)}")
         return None
-
 
 def process_displacement_files(input_dir, output_dir=None, solution_name=None, sampling="01D",
                                add_periodic=False, cpy1_file=None, cpy2_file=None,

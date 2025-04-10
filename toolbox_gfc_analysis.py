@@ -245,6 +245,8 @@ def plot_coefficient_time_series(series_dict, x_column='date', y_columns=None, e
 
     # Save if path is provided
     if save_path:
+        dirname = os.path.dirname(save_path)
+        os.makedirs(dirname, exist_ok=True)
         plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
         print(f"Time series plot saved to {save_path}")
 
@@ -583,6 +585,8 @@ def plot_geocenter_motion(solutions_dict, coeff_columns=['X', 'Y', 'Z'],
 
     # Save if path is provided
     if save_path:
+        dirname = os.path.dirname(save_path)
+        os.makedirs(dirname, exist_ok=True)
         plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
         print(f"Plot saved to {save_path}")
 
@@ -733,6 +737,10 @@ def plot_series_with_lombscargle(data_dict, column_name, apply_lowpass_filter, t
     # Statistics dictionary to return
     stats_dict = {}
 
+    # Variables to track min and max values for y-axis limits
+    min_y_values = []
+    max_y_values = []
+
     # Process each series
     for i, (series_key, data) in enumerate(data_dict.items()):
         # Convert to DataFrame if it's a Series
@@ -751,6 +759,9 @@ def plot_series_with_lombscargle(data_dict, column_name, apply_lowpass_filter, t
             series = data[column_name]
         else:
             raise ValueError(f"Column '{column_name}' not found in the DataFrame for '{series_key}'")
+
+        #Remove the mean
+        series = series - series.mean()
 
         # Calculate the time in days since the first observation for Lomb-Scargle
         time_days = np.array([(d - data.index[0]).total_seconds() / (24 * 3600) for d in data.index])
@@ -796,7 +807,11 @@ def plot_series_with_lombscargle(data_dict, column_name, apply_lowpass_filter, t
 
         # Plot the filtered time series
         ax1.plot(data.index, filtered_signal + curr_y_offset, color=color, alpha=alpha_filtered,
-                 linewidth=line_width_filtered, label='__nolegend__')
+                 linewidth=line_width_filtered, label=series_key)
+
+        # Store min and max values for ylim adjustment
+        min_y_values.append(min(series.min(), filtered_signal.min()) + curr_y_offset)
+        max_y_values.append(max(series.max(), filtered_signal.max()) + curr_y_offset)
 
         # Calculate periods from min_period to max_period days for the periodogram plot
         periods = np.logspace(np.log10(min_period), np.log10(max_period), 1000)
@@ -847,8 +862,19 @@ def plot_series_with_lombscargle(data_dict, column_name, apply_lowpass_filter, t
     unit_text = next(iter(units.values())) if any(units.values()) else ""
     ax1.set_ylabel(f'{title}{" [" + unit_text + "]" if unit_text else ""}')
 
+    # Set y-axis limits based on offsets rather than data values
+    if y_offset:
+        # Get the maximum offset value applied to any series
+        max_y_offset_value = max([offset for offset in y_offset.values()])
+        # Set lower limit to 60% of offset below 0
+        lower_limit = -0.6 * (max_y_offset_value / (n_series - 1) if n_series > 1 else max_y_offset_value)
+        # Set upper limit to 60% of offset above the maximum offset
+        upper_limit = max_y_offset_value + 0.6 * (
+            max_y_offset_value / (n_series - 1) if n_series > 1 else max_y_offset_value)
+        ax1.set_ylim(lower_limit, upper_limit)
+
     ax1.grid(True, which='major', alpha=0.3, axis='y')
-    ax1.legend(loc='upper right',fontsize=7)
+    # ax1.legend(loc='upper right', fontsize=7)
 
     # Configure date axis formatting
     # ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
@@ -884,6 +910,8 @@ def plot_series_with_lombscargle(data_dict, column_name, apply_lowpass_filter, t
 
     # Save the figure if a save path is provided
     if save_path:
+        dirname = os.path.dirname(save_path)
+        os.makedirs(dirname, exist_ok=True)
         plt.savefig(save_path, bbox_inches='tight', dpi=300)
 
     if return_fig:
@@ -891,24 +919,9 @@ def plot_series_with_lombscargle(data_dict, column_name, apply_lowpass_filter, t
     else:
         return stats_dict
 
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
-import matplotlib.transforms as transforms
-
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
-import matplotlib.transforms as transforms
-
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
-import matplotlib.transforms as transforms
 
 
 def plot_phasors(df, component, figsize=(10, 8), width_cm=None, save_path=None, return_fig=False):
@@ -985,7 +998,7 @@ def plot_phasors(df, component, figsize=(10, 8), width_cm=None, save_path=None, 
                 ha='left', va='bottom', alpha=0.7, fontsize=8)
 
     # Plot individual phasors
-    colors = plt.cm.tab10(np.linspace(0, 1, len(filtered_df)))
+    colors = default_colors = ['blue', 'red', 'green', 'purple', 'orange', 'brown', 'pink', 'gray', 'olive', 'cyan']#plt.cm.tab10(np.linspace(0, 1, len(filtered_df)))
 
     for idx, (_, row), color in zip(range(len(filtered_df)), filtered_df.iterrows(), colors):
         # Plot phasor as point (smaller size)
@@ -1039,6 +1052,8 @@ def plot_phasors(df, component, figsize=(10, 8), width_cm=None, save_path=None, 
 
     # Save the figure if a save path is provided
     if save_path:
+        dirname = os.path.dirname(save_path)
+        os.makedirs(dirname, exist_ok=True)
         plt.savefig(save_path, bbox_inches='tight', dpi=300)
 
     if return_fig:
