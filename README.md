@@ -2,6 +2,49 @@
 
 This repository contains a collection of Python scripts for analyzing global geodetic measurements, including station displacements from various techniques (GNSS, SLR, VLBI) based on SINEX files, and their relationship to various geophysical loading phenomena. The toolkit enables the processing of SINEX files, computation of displacements, comparison with loading models, visualization of results through global maps and time series analysis, and global inversion of station displacements to retrieve low-degree gravity field coefficients.
 
+## Installation
+
+### Prerequisites
+
+- Python 3.10+ (Python 3.12 recommended)
+- [Poetry](https://python-poetry.org/docs/#installation) for dependency management
+
+### Setup Instructions
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/ZajdelR/GNSSINV.git
+   cd GNSSINV
+   ```
+
+2. **Install dependencies using Poetry:**
+   ```bash
+   # Install dependencies
+   poetry install
+   
+   # Activate the Poetry environment
+   poetry shell
+   ```
+
+3. **Verifying installation:**
+   After activating the Poetry environment, you can verify that everything is working correctly by running:
+   ```bash
+   python -c "import numpy; import pandas; import xarray; print('Dependencies loaded successfully!')"
+   ```
+
+### Using with PyCharm
+
+To use this project with PyCharm:
+
+1. Open the GNSSINV project in PyCharm
+2. Go to File → Settings → Project → Python Interpreter
+3. Click the gear icon → Add
+4. Select "Existing Environment"
+5. Run `poetry env info --path` in a terminal to get your Poetry environment path
+6. In PyCharm, add the Python executable from this path:
+   - Windows: `Scripts\python.exe`
+   - macOS/Linux: `bin/python`
+
 ## Project Structure
 
 The project consists of several Python scripts for different processing steps:
