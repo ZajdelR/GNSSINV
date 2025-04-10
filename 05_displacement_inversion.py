@@ -527,10 +527,10 @@ def main():
     import gc
     from glob import glob
     default_solution = ''
-    default_solution = 'ESMGFZ_LSDM_cf_GRIDS'
+    # default_solution = 'ESMGFZ_LSDM_cf_GRIDS'
     # default_solution = 'ESMGFZ_H_cf_IGSNET'
     # default_solution = 'IGS1R03SNX_01D'
-    # default_solution = 'ITRF2020-IGS-RES_01D'
+    default_solution = 'ITRF2020-IGS-RES_01D'
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Process displacement data with error analysis')
@@ -549,7 +549,7 @@ def main():
                         help='Maximum spherical harmonic degree')
     parser.add_argument('--frame', type=str, default='CF',
                         help='Displacement frame')
-    parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD)', default='20180101')
+    parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD)', default='20180102')
     parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD)', default='20180102')
     parser.add_argument('--limit_stations', action='store_true', default=False,
                         help='Use only datum stations')
@@ -581,9 +581,6 @@ def main():
 
     print(f"Loading apriori station coordinates from {args.latlon}...")
     lat_lon = pd.read_pickle(args.latlon)
-    print(f"Loading station availability from {args.sta_availability}...")
-    station_availability = pd.read_pickle(args.sta_availability)
-    station_availability.index = station_availability.index.date
 
     if args.limit_stations:
         args.output += '_LIM'
@@ -669,6 +666,9 @@ def main():
 
         if args.limit_stations:
             try:
+                print(f"Loading station availability from {args.sta_availability}...")
+                station_availability = pd.read_pickle(args.sta_availability)
+                station_availability.index = station_availability.index.date
                 stations_for_date = station_availability.loc[date.date()].dropna()
                 len_df_snx = len(stations_for_date)
                 if args.only_datum:
