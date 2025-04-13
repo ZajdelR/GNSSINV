@@ -108,6 +108,53 @@ def reverse_cf_cm(df):
     df.loc[:,['X','Y','Z']] *= -1
     return df
 
+
+def apply_bandpass_filter(signal, lowcut, highcut, sampling_rate, order=4):
+    """
+    Apply a Butterworth band-pass filter to the time-series data.
+
+    Parameters:
+    signal (array-like): The time-series data to filter.
+    lowcut (float): The lower cutoff frequency for the filter (in Hz).
+    highcut (float): The higher cutoff frequency for the filter (in Hz).
+    sampling_rate (float): The sampling rate of the data (in Hz).
+    order (int): The order of the filter (default is 4).
+
+    Returns:
+    array-like: The filtered time-series data after applying the band-pass filter.
+    """
+    # Handle NaN values by interpolation
+    signal_copy = np.copy(signal)
+    nan_indices = np.isnan(signal_copy)
+
+    if np.any(nan_indices):
+        # Create an array of indices
+        indices = np.arange(len(signal_copy))
+        # Get the indices of non-NaN values
+        valid_indices = indices[~nan_indices]
+        # Get the non-NaN values
+        valid_values = signal_copy[~nan_indices]
+        # Interpolate NaN values
+        if len(valid_values) > 0:  # Make sure there's at least one valid value
+            signal_copy[nan_indices] = np.interp(indices[nan_indices], valid_indices, valid_values)
+
+    nyquist = 0.5 * sampling_rate  # Nyquist frequency
+    low = lowcut / nyquist
+    high = highcut / nyquist
+
+    # Ensure the frequencies are within valid range (0 to 1)
+    low = max(0.0001, min(low, 0.9999))
+    high = max(low + 0.0001, min(high, 0.9999))
+
+    # For daily data with month to year band, a lower order filter may work better
+    b, a = butter(order, [low, high], btype='band', analog=False)  # Get filter coefficients
+    filtered_signal = filtfilt(b, a, signal_copy)  # Apply forward-backward filtering for zero-phase filtering
+
+    # Restore NaN values in the original positions
+    filtered_signal[nan_indices] = np.nan
+
+    return filtered_signal
+
 def apply_lowpass_filter(signal, cutoff_frequency, sampling_rate, order=4):
     """
     Apply a Butterworth low-pass filter to the time-series data.

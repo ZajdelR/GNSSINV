@@ -566,7 +566,7 @@ def create_correlation_map(comp_dir, value_to_plot, output_dir=None, pattern='*_
     )
 
     cbar = plt.colorbar(scatter, ax=ax, orientation='horizontal', pad=0.05, shrink=0.7)
-    cbar.set_label(f'Correlation between Original Data and {compare_with}')
+    cbar.set_label(f'{value_to_plot.upper()} between Original Data and {compare_with}')
 
     top_n = 15
     top_stations = plot_df.nlargest(top_n, value_to_plot)
@@ -578,15 +578,15 @@ def create_correlation_map(comp_dir, value_to_plot, output_dir=None, pattern='*_
                 ha='center', va='bottom',
                 bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.2', linewidth=0))
 
-    title = f'Correlation Analysis for {solution}: {compare_with} vs Original (without {sum_components})'
+    title = f'{value_to_plot.upper()} for {solution}: {compare_with} vs Original (without {sum_components})'
     subtitle = f'Stations with at least {min_num_points} data points and H std ≥ {min_h_std} mm'
     ax.set_title(f'{title}\n{subtitle}', fontsize=14)
 
     stats_text = (
         f"Total stations: {len(plot_df)}\n"
         f"Excluded stations: {len(excluded_df)} (Points: {excluded_by_points}, H std: {excluded_by_h_std})\n"
-        f"Mean correlation: {plot_df[value_to_plot].mean():.2f}\n"
-        f"Median correlation: {plot_df[value_to_plot].median():.2f}\n"
+        f"Mean {value_to_plot.upper()}: {plot_df[value_to_plot].mean():.2f}\n"
+        f"Median {value_to_plot.upper()}: {plot_df[value_to_plot].median():.2f}\n"
         f"Range: {plot_df[value_to_plot].min():.2f} - {plot_df[value_to_plot].max():.2f}"
     )
 
@@ -661,18 +661,23 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
 
 # Example usage
 if __name__ == "__main__":
-    # solution = 'ITRF2020-IGS-RES'
-    solution = 'IGS1R03SNX'
+    solution = 'ITRF2020-IGS-RES'
+    # solution = 'IGS1R03SNX'
     sampling = '01D'
     reduction = 'AOS'
-    vs = 'H'
+    vs = 'M'
+    suffix = ''
 
     # Example usage with default directory
     comp_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL'
-    output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS")
+
+    if 'BP' in suffix:
+        output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'WITH_BP')
+    else:
+        output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'NO_BP')
     min_num_points = 1000
     min_h_std = 2.0  # 1.5 mm minimum standard deviation for H component
-    pattern = f'*_WO-{reduction}_VS_SUM-{vs}*.PKL'
+    pattern = f'*_WO-{reduction}_VS_SUM-{vs}{suffix}.PKL'
 
     print(f"Using parameters: min_num_points={min_num_points}, min_h_std={min_h_std}")
     print(f"Pattern: {pattern}")

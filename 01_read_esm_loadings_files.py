@@ -10,6 +10,8 @@ from tqdm import tqdm
 import logging
 import sys
 
+import gcc_analysis_tools
+from gcc_analysis_tools import apply_bandpass_filter
 
 def setup_logging(log_dir):
     """
@@ -60,7 +62,7 @@ def setup_logging(log_dir):
     return logger
 
 
-def process_file(filepath, output_dir, logger):
+def process_file(filepath, output_dir, logger, use_bp_filter):
     """
     Process a GFZ loading file and save it as a pickle using pandas.
     Ensures output is daily with means from higher frequency samples.
@@ -102,6 +104,7 @@ def process_file(filepath, output_dir, logger):
             frame = 'cf'
         elif '.cm' in filename:
             frame = 'cm'
+            return None
         else:
             logger.warning(f"Unknown frame in file: {filename}")
             return {
@@ -153,6 +156,51 @@ def process_file(filepath, output_dir, logger):
 
             df.index = new_index
 
+        if use_bp_filter:
+            # Apply bandpass filter
+            sampling_rate = 1 / (24 * 60 * 60)
+            one_month_in_seconds = 10 * 24 * 60 * 60  # seconds in a month
+            one_year_in_seconds = 500 * 24 * 60 * 60  # seconds in a year
+
+            # Higher frequency (shorter period) = 1 month
+            highcut = 1 / one_month_in_seconds  # Hz
+
+            # Lower frequency (longer period) = 1 year
+            lowcut = 1 / one_year_in_seconds  # Hz
+
+            filtered_df = pd.DataFrame(index=df.index)
+
+            # Apply the band-pass filter to each column
+            for column in ['NS', 'EW', 'R']:
+                # Check if column exists
+                if column in df.columns:
+                    try:
+                        filtered_df[f'{column}'] = apply_bandpass_filter(
+                            df[column].values,
+                            lowcut,
+                            highcut,
+                            sampling_rate,
+                            order=2  # Lower order for stability with daily data
+                        )
+                        print(f"Successfully filtered {column}")
+                    except Exception as e:
+                        print(f"Error filtering {column}: {e}")
+                        # Fallback to a simpler approach if filter fails
+                        filtered_df[f'{column}_filtered'] = df[column]
+                else:
+                    print(f"Column {column} not found in DataFrame")
+            #
+            # residuals = np.sqrt(np.sum((df - filtered_df)**2,axis=0))
+            # logger.info(f"RMS of residuals after bandpass filter {residuals*1e3:.2f}")
+
+            # data_dict = {'filtered': filtered_df,
+            #              'normal': df}
+            #
+            # from gcc_analysis_tools import fit_and_provide_annual_semiannual_table_with_errors
+            # annual = fit_and_provide_annual_semiannual_table_with_errors(data_dict,['NS','EW','R'])
+        else:
+            filtered_df = df - df.mean()
+
         # Create output filename
         output_filename = f"{charcode}_{component}_{frame}.pkl"
         output_path = os.path.join(output_dir, output_filename)
@@ -162,7 +210,7 @@ def process_file(filepath, output_dir, logger):
 
         # Save as pickle
         with open(output_path, 'wb') as f:
-            pickle.dump(df, f)
+            pickle.dump(filtered_df, f)
 
         # Return success information
         return {
@@ -189,6 +237,8 @@ def main():
     log_dir = "LOGS"
     logger = setup_logging(log_dir)
 
+    use_bp_filter = False
+
     start_time = time.time()
 
     # Directory containing input files
@@ -197,7 +247,10 @@ def main():
     logger.info(f"Input directory: {input_dir}")
 
     # Output directory for pickle files
-    output_dir = r"EXT\ESMGFZLOADING\CODE"
+    if use_bp_filter:
+        output_dir = r"EXT\ESMGFZLOADING\CODE_BP"
+    else:
+        output_dir = r"EXT\ESMGFZLOADING\CODE"
     logger.info(f"Output directory: {output_dir}")
 
     # Make sure output directory exists
@@ -211,7 +264,7 @@ def main():
             filepath = os.path.join(input_dir, filename)
             files_to_process.append(filepath)
 
-    # files_to_process = files_to_process[:50]
+    # files_to_process = files_to_process[:10]
 
     logger.info(f"Found {len(files_to_process)} files to process")
 
@@ -231,7 +284,7 @@ def main():
     # Process files in parallel using ThreadPoolExecutor
     with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
         # Submit all tasks
-        future_to_file = {executor.submit(process_file, filepath, output_dir, logger): filepath
+        future_to_file = {executor.submit(process_file, filepath, output_dir, logger, use_bp_filter): filepath
                           for filepath in files_to_process}
 
         # Create a progress bar
@@ -280,7 +333,6 @@ def main():
     print(f"Resampled to daily: {results['resampled']}")
     print(f"Total processing time: {elapsed_time:.2f} seconds")
     print(f"Log file saved to: {log_dir}")
-
 
 if __name__ == "__main__":
     main()

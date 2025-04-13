@@ -192,6 +192,11 @@ The scripts expect the following directory structure:
   - GNSS: Analysis Center contributions to repro3 are publicly available at https://cddis.nasa.gov/archive/gnss/products/wwww/repro3/, where *wwww* stands for the 4-character GPS week number
   - SLR and VLBI: Available from ITRF combination centers (can be processed with the same tools)
 
+- **ITRF GNSS Residuals**:
+
+  - ITRF2020 GNSS residual files can be downloaded from: https://itrf.ign.fr/ftp/pub/itrf/itrf2020/ITRF2020-IGS-RES.tar
+  - These files contain station position residuals that can be processed using the `01_read_ITRF_res_files.py` script
+
 - **Loading Model Data**: 
   - ESMGFZ loading deformation models are available from http://rz-vm115.gfz-potsdam.de:8080/repository
   - GGFC loading deformation models are available from http://loading.u-strasbg.fr/ITRF2020

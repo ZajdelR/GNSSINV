@@ -14,6 +14,7 @@ import datetime
 import concurrent.futures
 import threading
 import time
+from gcc_analysis_tools import apply_bandpass_filter
 
 # Add a lock for thread-safe file operations and printing
 print_lock = threading.Lock()
@@ -71,16 +72,16 @@ def process_station_wrapper(args):
     tuple
         (station_name, result) or (station_name, None) if processing failed
     """
-    sta, sampling, solution, reduce_components, compare_components, start_date, end_date = args
+    sta, sampling, solution, reduce_components, compare_components, subfolder, start_date, end_date = args
     try:
-        result = process_station(sta, sampling, solution, reduce_components, compare_components, start_date, end_date)
+        result = process_station(sta, sampling, solution, reduce_components, compare_components, subfolder, start_date, end_date)
         return (sta, result)
     except Exception as e:
         with print_lock:
             print(f"Error processing station {sta}: {str(e)}")
         return (sta, None)
 
-def process_station(sta, sampling, solution, reduce_components, compare_components, start_date=None, end_date=None):
+def process_station(sta, sampling, solution, reduce_components, compare_components, subfolder, start_date=None, end_date=None):
     """
     Process a single station and create comparison plots.
 
@@ -116,13 +117,49 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
     if df is None:
         return None
 
+    if 'BP' in subfolder:
+        # Apply bandpass filter
+        sampling_rate = 1 / (24 * 60 * 60)
+        one_month_in_seconds = 10 * 24 * 60 * 60  # seconds in a month
+        one_year_in_seconds = 500 * 24 * 60 * 60  # seconds in a year
+
+        # Higher frequency (shorter period) = 1 month
+        highcut = 1 / one_month_in_seconds  # Hz
+
+        # Lower frequency (longer period) = 1 year
+        lowcut = 1 / one_year_in_seconds  # Hz
+
+        filtered_df = pd.DataFrame(index=df.index)
+
+        # Apply the band-pass filter to each column
+        for column in ['dN', 'dE', 'dU']:
+            # Check if column exists
+            if column in df.columns:
+                try:
+                    filtered_df[f'{column}'] = apply_bandpass_filter(
+                        df[column].values,
+                        lowcut,
+                        highcut,
+                        sampling_rate,
+                        order=2  # Lower order for stability with daily data
+                    )
+                    print(f"Successfully filtered {column}")
+                except Exception as e:
+                    print(f"Error filtering {column}: {e}")
+                    # Fallback to a simpler approach if filter fails
+                    filtered_df[f'{column}_filtered'] = df[column]
+            else:
+                print(f"Column {column} not found in DataFrame")
+
+        df.loc[:,['dN', 'dE', 'dU']] = filtered_df.loc[:,['dN', 'dE', 'dU']]
+
     # STEP 1: Handle the components to reduce from the original data
-    df_red, reduce_components_name = reduce_components_from_data(sta, df, reduce_components, sampling)
+    df_red, reduce_components_name = reduce_components_from_data(sta, df, reduce_components, sampling, subfolder)
     if df_red is None:
         return None
 
     # STEP 2: Generate the comparison dataset by summing selected components
-    comp_df, compare_components_name = create_comparison_data(sta, compare_components, sampling)
+    comp_df, compare_components_name = create_comparison_data(sta, compare_components, sampling, subfolder)
     if comp_df is None:
         return None
 
@@ -196,15 +233,22 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
     }
 
     # Create filename based on what's being compared
-    output_file = os.path.join(output_dir, 'PKL', f'{solution}_{sta}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}.PKL')
+    if 'BP' in subfolder:
+        output_file = os.path.join(output_dir, 'PKL', f'{solution}_{sta}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}_BP.PKL')
+    else:
+        output_file = os.path.join(output_dir, 'PKL', f'{solution}_{sta}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}.PKL')
     with file_lock:
         pd.to_pickle(comparison_data, output_file)
         with print_lock:
             print(f"Comparison data saved to {output_file}")
 
     # Save the figure as PNG as well
-    fig_output = os.path.join(output_dir, 'TS_COMP',
-                              f'{solution}_{sta}_{sampling}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}.png')
+    if 'BP' in subfolder:
+        fig_output = os.path.join(output_dir, 'TS_COMP',
+                                  f'{solution}_{sta}_{sampling}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}_BP.png')
+    else:
+        fig_output = os.path.join(output_dir, 'TS_COMP',
+                                  f'{solution}_{sta}_{sampling}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}.png')
     with file_lock:
         plt.savefig(fig_output, dpi=200, bbox_inches='tight')
         with print_lock:
@@ -237,7 +281,7 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
 
     return comparison_data
 
-def reduce_components_from_data(sta, df, reduce_components, sampling):
+def reduce_components_from_data(sta, df, reduce_components, sampling, subfolder=''):
     """
     Remove selected components from the original data.
 
@@ -262,29 +306,17 @@ def reduce_components_from_data(sta, df, reduce_components, sampling):
     component_labels = []
     files = []
 
-    if reduce_components['A']:
-        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_A_cf.PKL'
-        if os.path.exists(file_path):
-            files.append(file_path)
-            component_labels.append('A')
+    # Define all possible components
+    components = ['A', 'O', 'S', 'H']
 
-    if reduce_components['O']:
-        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_O_cf.PKL'
-        if os.path.exists(file_path):
-            files.append(file_path)
-            component_labels.append('O')
-
-    if reduce_components['S']:
-        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_S_cf.PKL'
-        if os.path.exists(file_path):
-            files.append(file_path)
-            component_labels.append('S')
-
-    if reduce_components['H']:
-        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_H_cf.PKL'
-        if os.path.exists(file_path):
-            files.append(file_path)
-            component_labels.append('H')
+    # Loop through each component
+    for component in components:
+        # Only process if this component is enabled in reduce_components
+        if reduce_components.get(component, False):
+            file_path = f'EXT/ESMGFZLOADING/{subfolder}/{sta}_{component}_cf.PKL'
+            if os.path.exists(file_path):
+                files.append(file_path)
+                component_labels.append(component)
 
     # Convert index to date for consistency
     df.index = df.index.date
@@ -326,7 +358,7 @@ def reduce_components_from_data(sta, df, reduce_components, sampling):
 
     return df_red, components_name
 
-def create_comparison_data(sta, compare_components, sampling):
+def create_comparison_data(sta, compare_components, sampling, subfolder):
     """
     Create a comparison dataset by summing selected components.
 
@@ -349,41 +381,17 @@ def create_comparison_data(sta, compare_components, sampling):
     component_labels = []
     files = []
 
-    if compare_components['A']:
-        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_A_cf.PKL'
-        if os.path.exists(file_path):
-            files.append(file_path)
-            component_labels.append('A')
+    # Define all possible components
+    components = ['A', 'O', 'S', 'H', 'M', 'L']
 
-    if compare_components['O']:
-        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_O_cf.PKL'
-        if os.path.exists(file_path):
-            files.append(file_path)
-            component_labels.append('O')
-
-    if compare_components['S']:
-        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_S_cf.PKL'
-        if os.path.exists(file_path):
-            files.append(file_path)
-            component_labels.append('S')
-
-    if compare_components['H']:
-        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_H_cf.PKL'
-        if os.path.exists(file_path):
-            files.append(file_path)
-            component_labels.append('H')
-
-    if compare_components['M']:
-        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_M_cf.PKL'
-        if os.path.exists(file_path):
-            files.append(file_path)
-            component_labels.append('M')
-
-    if compare_components['L']:
-        file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_L_cf.PKL'
-        if os.path.exists(file_path):
-            files.append(file_path)
-            component_labels.append('L')
+    # Loop through each component
+    for component in components:
+        # Only process if this component is enabled in compare_components
+        if compare_components.get(component, False):
+            file_path = f'EXT/ESMGFZLOADING/{subfolder}/{sta}_{component}_cf.PKL'
+            if os.path.exists(file_path):
+                files.append(file_path)
+                component_labels.append(component)
 
     # Load and combine selected components
     if files:
@@ -1006,14 +1014,16 @@ def main():
     """Main function to process all stations with enhanced options for component handling."""
     # Parameters to customize analysis
     sampling = '01D'
-    # solution = 'ITRF2020-IGS-RES'
-    solution = 'IGS1R03SNX'
+    solution = 'ITRF2020-IGS-RES'
+    # solution = 'IGS1R03SNX'
+
+    subfolder = 'CODE_BP'
 
     # Select which components to remove from the original data (set to True to remove)
     reduce_components = {
-        'A': 0,  # Atmospheric loading
-        'O': 0,  # Ocean loading
-        'S': 0,  # Surface water loading
+        'A': 1,  # Atmospheric loading
+        'O': 1,  # Ocean loading
+        'S': 1,  # Surface water loading
         'H': 0   # Hydrological loading
     }
 
@@ -1022,9 +1032,9 @@ def main():
         'A': 0,  # Atmospheric loading
         'O': 0,  # Ocean loading
         'S': 0,  # Surface water loading
-        'H': 1,  # Hydrological loading old LSDM
+        'H': 0,  # Hydrological loading old LSDM
         'L': 0,  # Hydrological loading Lisflood
-        'M': 0,  # Hydrological loading LSDM
+        'M': 1,  # Hydrological loading LSDM
     }
 
     # Determine the number of workers (threads)
@@ -1037,7 +1047,7 @@ def main():
             print(f"Processing specified stations: {', '.join(stations)}")
     else:
         # Find all available stations
-        stations = find_stations(solution, sampling)[978:]
+        stations = find_stations(solution, sampling)#[978:]
         with print_lock:
             print(f"Found {len(stations)} stations: {', '.join(stations)}")
 
@@ -1063,7 +1073,7 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Create arguments for each station
         # Create arguments for each station
-        args_list = [(sta, sampling, solution, reduce_components, compare_components, start_date, end_date) for sta in
+        args_list = [(sta, sampling, solution, reduce_components, compare_components, subfolder, start_date, end_date) for sta in
                      stations]
         # Submit all tasks and get Future objects
         future_to_station = {
@@ -1099,7 +1109,10 @@ def main():
         print(f"Successfully processed {len(results)} out of {len(stations)} stations.")
 
     # Create a summary of all stations
-    summary_file = f'{out_path}/{solution}_ALL_STATIONS_WO-{reduce_str}_VS_SUM-{compare_str}_SUMMARY.PKL'
+    if "BP" in subfolder:
+        summary_file = f'{out_path}/{solution}_ALL_STATIONS_WO-{reduce_str}_VS_SUM-{compare_str}_BP_SUMMARY.PKL'
+    else:
+        summary_file = f'{out_path}/{solution}_ALL_STATIONS_WO-{reduce_str}_VS_SUM-{compare_str}_SUMMARY.PKL'
 
     # Extract key statistics for all stations
     summary_stats = {}

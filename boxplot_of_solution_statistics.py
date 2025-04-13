@@ -40,7 +40,9 @@ def create_boxplot_comparison(file_pattern, inp_dir, column_name, output_filenam
             # Extract a more readable name from the file path
             file_name = os.path.basename(file_path)
             # Remove common prefix and suffix to get a cleaner label
-            label = file_name.replace("IGS1R03SNX_variance_explained_data_", "").replace("_VS_H.csv", "")
+            label = file_name.split('.')[-2]
+            label = label.split('_')
+            label = "_".join(label[-3:])
 
             # Read the CSV file
             df = pd.read_csv(file_path)
@@ -124,15 +126,17 @@ def create_boxplot_comparison(file_pattern, inp_dir, column_name, output_filenam
 
 if __name__ == "__main__":
     # Example usage
-    solution = 'IGS1R03SNX'
+    solution = 'ITRF2020-IGS-RES'
     sampling = '01D'
-    inp_dir = rf'INPUT_CRD/{solution}_{sampling}/COMP/MAPS'
-    file_pattern = f"{solution}_variance_explained_data_*.csv"
-    column_name = "variance_explained"
-    output_filename = f"{column_name}_boxplot.png"
+    inp_dir = rf'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/MAPS/WITH_BP/'
 
-    # Create the boxplot
-    summary = create_boxplot_comparison(file_pattern, inp_dir,
-                                        column_name,
-                                        output_filename,
-                                        solution=f'{solution}_{sampling}')
+    for column_name in ['std_reduction', 'variance_explained', 'correlation']:
+        # column_name = "std_reduction"
+        file_pattern = f"{solution}_{column_name}_data_*.csv"
+        output_filename = f"{column_name}_boxplot.png"
+
+        # Create the boxplot
+        summary = create_boxplot_comparison(file_pattern, inp_dir,
+                                            column_name,
+                                            output_filename,
+                                            solution=f'{solution}_{sampling}')
