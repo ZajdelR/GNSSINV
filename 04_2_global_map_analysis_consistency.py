@@ -665,8 +665,8 @@ if __name__ == "__main__":
     # solution = 'IGS1R03SNX'
     sampling = '01D'
     reduction = 'AOS'
-    vs = 'M'
-    suffix = ''
+    vs = 'L'
+    suffix = '_BP'
 
     # Example usage with default directory
     comp_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL'

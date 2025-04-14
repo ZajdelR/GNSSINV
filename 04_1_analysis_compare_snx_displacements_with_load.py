@@ -531,8 +531,8 @@ def calculate_statistics(df1, df2, common_dates):
     from scipy import stats
 
     # Extract the dU values for common dates
-    series1 = df1.loc[common_dates]['dU']
-    series2 = df2.loc[common_dates]['dU']
+    series1 = df1.loc[common_dates]['dU'] - np.mean(df1.loc[common_dates]['dU'])
+    series2 = df2.loc[common_dates]['dU'] - np.mean(df2.loc[common_dates]['dU'])
 
     # Calculate differences
     differences = series1 - series2
@@ -559,7 +559,7 @@ def calculate_statistics(df1, df2, common_dates):
 
     # Calculate the components
     r = corr  # Correlation component (already calculated)
-    beta = mean_sim / mean_obs  # Bias ratio
+    beta = 1#mean_sim / mean_obs  # Bias ratio
     alpha = std_sim / std_obs  # Variability ratio
 
     # Calculate KGE (2009 version)
@@ -1022,8 +1022,8 @@ def main():
     # Select which components to remove from the original data (set to True to remove)
     reduce_components = {
         'A': 1,  # Atmospheric loading
-        'O': 1,  # Ocean loading
-        'S': 1,  # Surface water loading
+        'O': 0,  # Ocean loading
+        'S': 0,  # Surface water loading
         'H': 0   # Hydrological loading
     }
 
@@ -1033,8 +1033,8 @@ def main():
         'O': 0,  # Ocean loading
         'S': 0,  # Surface water loading
         'H': 0,  # Hydrological loading old LSDM
-        'L': 0,  # Hydrological loading Lisflood
-        'M': 1,  # Hydrological loading LSDM
+        'L': 1,  # Hydrological loading Lisflood
+        'M': 0,  # Hydrological loading LSDM
     }
 
     # Determine the number of workers (threads)

@@ -10,6 +10,7 @@ from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
 import matplotlib.ticker as mticker
 from matplotlib.patches import Patch
 import matplotlib
+from matplotlib.colors import TwoSlopeNorm
 
 # Use TkAgg backend for interactive plots
 matplotlib.use('TkAgg')
@@ -132,6 +133,20 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
     # Calculate differential
     df1['diff'] = df1[column_name] - df2[column_name]
 
+    # Calculate percentage improvement
+    # For higher_is_better metrics, negative percentage means file1 (M) is better
+    # For lower_is_better metrics, positive percentage means file1 (M) is better
+    # We'll adjust the sign based on the higher_is_better flag to maintain consistency
+    # where negative means file1 (M) is better and positive means file2 (L) is better
+
+    # To avoid division by zero, use the maximum of the two values for normalization
+    max_vals = np.maximum(df1[column_name], df2[column_name])
+
+    # Calculate percentage difference
+    # We reverse the sign if higher_is_better is True
+    sign_factor = -1 if higher_is_better else 1
+    df1['pct_improvement'] = sign_factor * (df1[column_name] - df2[column_name]) / max_vals * 100
+
     # Print statistics
     print(f"Total stations: {len(df1)}")
     print(f"\n{column_name.capitalize()} comparison ({('higher' if higher_is_better else 'lower')} is better):")
@@ -144,6 +159,12 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
     median_diff = (df1[column_name] - df2[column_name]).median()
     print(f"\nAverage {column_name} difference ({file1_label}-{file2_label}): {mean_diff:.4f}")
     print(f"Median {column_name} difference ({file1_label}-{file2_label}): {median_diff:.4f}")
+
+    # Calculate average percentage improvement
+    mean_pct_improvement = df1['pct_improvement'].mean()
+    median_pct_improvement = df1['pct_improvement'].median()
+    print(f"\nAverage percentage improvement: {mean_pct_improvement:.2f}% (negative means {file1_label} is better)")
+    print(f"Median percentage improvement: {median_pct_improvement:.2f}% (negative means {file1_label} is better)")
 
     # Extract scenario and model info from filenames
     scenario = os.path.basename(file1).split('_data_')[1].split('_VS_')[0]
@@ -167,6 +188,8 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
         'equal_percent': equal / len(df1) * 100,
         'mean_difference': mean_diff,
         'median_difference': median_diff,
+        'mean_pct_improvement': mean_pct_improvement,
+        'median_pct_improvement': median_pct_improvement,
         f'{file1_label}_mean': df1[column_name].mean(),
         f'{file2_label}_mean': df2[column_name].mean(),
         f'{file1_label}_median': df1[column_name].median(),
@@ -177,7 +200,7 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
     if not plot_title:
         plot_title = f"{column_name.capitalize()} Comparison: {scenario} - {file1_label} vs {file2_label}"
 
-    # 1. Create Map Plot with Cartopy
+    # 1. Create Map Plot with Cartopy (which solution is better)
     fig_map = plt.figure(figsize=figsize_map)
     ax_map = fig_map.add_subplot(1, 1, 1, projection=ccrs.Robinson())
 
@@ -217,11 +240,6 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
         zorder=10
     )
 
-    # Plot second map showing actual values
-    # Create a mask to get separate colorbars for positive and negative values
-    has_positive = any(df1['diff'] > 0)
-    has_negative = any(df1['diff'] < 0)
-
     # Create legend elements for comparison plot
     legend_elements = []
     if file1_better > 0:
@@ -258,7 +276,89 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
         plt.savefig(map_file, dpi=dpi, bbox_inches='tight')
         print(f"Map figure saved to {map_file}")
 
-    # 2. Create Pie Chart
+    # 2. Create a new map showing percentage improvement
+    fig_pct = plt.figure(figsize=figsize_map)
+    ax_pct = fig_pct.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+
+    # Add map features
+    ax_pct.add_feature(cfeature.LAND, facecolor='lightgray')
+    ax_pct.add_feature(cfeature.OCEAN, facecolor='lightblue')
+    ax_pct.add_feature(cfeature.COASTLINE, linewidth=0.5)
+    ax_pct.add_feature(cfeature.BORDERS, linewidth=0.5, linestyle=':')
+
+    # Set up gridlines
+    gl = ax_pct.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
+                          linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+    gl.top_labels = False
+    gl.right_labels = False
+    gl.xformatter = LONGITUDE_FORMATTER
+    gl.yformatter = LATITUDE_FORMATTER
+    gl.xlocator = mticker.MaxNLocator(nbins=6)
+    gl.ylocator = mticker.MaxNLocator(nbins=6)
+
+    ax_pct.set_global()
+
+    # Set fixed colorbar limits from -100 to 100
+    vmin = -15
+    vmax = 15
+
+    # Get actual min/max for informational purposes
+    actual_min = df1['pct_improvement'].min()
+    actual_max = df1['pct_improvement'].max()
+
+    # Use a diverging colormap with white at zero
+    cmap = plt.cm.RdBu_r  # Red-Blue reversed (negative: blue, positive: red)
+
+    # Set up normalization for the colormap
+    # Use TwoSlopeNorm to center the colormap at zero with fixed limits
+    norm = TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+
+    # Plot the percentage improvement
+    scatter_pct = ax_pct.scatter(
+        df1[lon_col], df1[lat_col],
+        transform=ccrs.PlateCarree(),
+        c=df1['pct_improvement'],
+        s=50,
+        alpha=0.7,
+        edgecolor='black',
+        linewidth=0.5,
+        zorder=10,
+        cmap=cmap,
+        norm=norm
+    )
+
+    # Add colorbar with fixed limits
+    cbar = plt.colorbar(scatter_pct, orientation='horizontal', pad=0.05, shrink=0.75)
+    cbar.set_label(f'Percentage Improvement (%) - Negative: {file1_label} better, Positive: {file2_label} better')
+
+    # Ensure the colorbar ticks are set properly to show the range
+    cbar.set_ticks([-100, -75, -50, -25, 0, 25, 50, 75, 100])
+
+    # Add title
+    ax_pct.set_title(f"{plot_title}\nPercentage Improvement at each station", fontsize=14)
+
+    stats_text = (
+        f"Total stations: {len(df1)}\n"
+        f"Mean % improvement: {mean_pct_improvement:.2f}%\n"
+        f"Median % improvement: {median_pct_improvement:.2f}%\n"
+        f"Actual range: [{actual_min:.2f}%, {actual_max:.2f}%]\n"
+        f"Colorbar range: [{vmin}%, {vmax}%]\n"
+        f"Negative values: {file1_label} better, Positive values: {file2_label} better"
+    )
+
+    plt.figtext(0.02, 0.05, stats_text, fontsize=10,
+                bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
+
+    plt.tight_layout()
+
+    # Save percentage improvement map
+    if output_dir:
+        pct_map_file = os.path.join(output_dir,
+                                    f"{scenario}_{column_name}_pct_improvement_{file1_label}_vs_{file2_label}.png")
+        plt.savefig(pct_map_file, dpi=dpi, bbox_inches='tight')
+        print(f"Percentage improvement map saved to {pct_map_file}")
+
+    # 3. Create Pie Chart
     fig_pie = plt.figure(figsize=figsize_pie)
     ax_pie = fig_pie.add_subplot(1, 1, 1)
 
@@ -296,7 +396,8 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
         f"Total stations: {len(df1)}\n"
         f"Mean {file1_label}: {df1[column_name].mean():.4f}\n"
         f"Mean {file2_label}: {df2[column_name].mean():.4f}\n"
-        f"Mean diff: {mean_diff:.4f}"
+        f"Mean diff: {mean_diff:.4f}\n"
+        f"Mean % improvement: {mean_pct_improvement:.2f}%"
     )
 
     plt.figtext(0.02, 0.02, stats_text, fontsize=10,
@@ -310,7 +411,7 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
         plt.savefig(pie_file, dpi=dpi, bbox_inches='tight')
         print(f"Pie chart saved to {pie_file}")
 
-    # 3. Save combined dataset with comparison results for further analysis
+    # 4. Save combined dataset with comparison results for further analysis
     if output_dir:
         # Merge dataframes to have both values in one
         if station_column:
@@ -326,6 +427,7 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
         # Add the comparison column
         df_combined['better_solution'] = df1['better_solution']
         df_combined['diff'] = df1['diff']
+        df_combined['pct_improvement'] = df1['pct_improvement']
 
         # Save the combined dataset
         combined_file = os.path.join(output_dir,
@@ -431,7 +533,7 @@ def main():
 if __name__ == "__main__":
     # Example direct execution
     inp_dir = r'OUTPUT\SNX_LOAD_COMPARISONS\ITRF2020-IGS-RES_01D\MAPS\WITH_BP'
-    scenarios = ['WO-A', 'WO-AOS', 'WO-None']
+    scenarios = ['WO-A']#, 'WO-AOS', 'WO-None']
     statistics = ['std_reduction', 'variance_explained', 'correlation', 'kge2012']
 
     run_batch_analysis(inp_dir, scenarios, statistics, 'LSDM', 'Lisflood', output_dir=inp_dir)

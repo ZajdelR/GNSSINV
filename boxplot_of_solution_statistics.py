@@ -130,7 +130,7 @@ if __name__ == "__main__":
     sampling = '01D'
     inp_dir = rf'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/MAPS/WITH_BP/'
 
-    for column_name in ['std_reduction', 'variance_explained', 'correlation']:
+    for column_name in ['std_reduction', 'variance_explained', 'correlation','kge2012']:
         # column_name = "std_reduction"
         file_pattern = f"{solution}_{column_name}_data_*.csv"
         output_filename = f"{column_name}_boxplot.png"
