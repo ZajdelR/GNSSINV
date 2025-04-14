@@ -65,23 +65,29 @@ def process_station_wrapper(args):
     Parameters:
     -----------
     args : tuple
-        Tuple containing (sta, sampling, solution, reduce_components, compare_components)
+        Tuple containing (sta, sampling, solution, reduce_components, compare_components,
+                          filter_params, start_date, end_date)
 
     Returns:
     --------
     tuple
         (station_name, result) or (station_name, None) if processing failed
     """
-    sta, sampling, solution, reduce_components, compare_components, subfolder, start_date, end_date = args
+    sta, sampling, solution, reduce_components, compare_components, filter_params, start_date, end_date = args
     try:
-        result = process_station(sta, sampling, solution, reduce_components, compare_components, subfolder, start_date, end_date)
+        result = process_station(
+            sta, sampling, solution, reduce_components, compare_components,
+            filter_params, start_date, end_date
+        )
         return (sta, result)
     except Exception as e:
         with print_lock:
             print(f"Error processing station {sta}: {str(e)}")
         return (sta, None)
 
-def process_station(sta, sampling, solution, reduce_components, compare_components, subfolder, start_date=None, end_date=None):
+
+def process_station(sta, sampling, solution, reduce_components, compare_components,
+                    filter_params, start_date=None, end_date=None):
     """
     Process a single station and create comparison plots.
 
@@ -97,6 +103,12 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
         Dictionary indicating which components to remove from the original data
     compare_components : dict
         Dictionary indicating which components to include in the comparison sum
+    filter_params : dict
+        Dictionary containing bandpass filter parameters (lowcut, highcut, order)
+    start_date : datetime.date, optional
+        Start date for filtering data
+    end_date : datetime.date, optional
+        End date for filtering data
 
     Returns:
     --------
@@ -105,6 +117,18 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
     """
     with print_lock:
         print(f"\nProcessing station: {sta}")
+
+    # Extract filter parameters
+    apply_filter = filter_params.get('apply_filter', False)
+    lowcut = filter_params.get('lowcut', 0.0)
+    highcut = filter_params.get('highcut', 0.0)
+    filter_order = filter_params.get('order', 2)
+
+    # Create output directory name based on filter parameters
+    if apply_filter:
+        subfolder = f"BP_{int(1 / highcut / 86400)}d_{int(1 / lowcut / 86400)}d"
+    else:
+        subfolder = "NOFILTER"
 
     # Create output directory if it doesn't exist
     output_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}'
@@ -117,17 +141,21 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
     if df is None:
         return None
 
-    if 'BP' in subfolder:
-        # Apply bandpass filter
-        sampling_rate = 1 / (24 * 60 * 60)
-        one_month_in_seconds = 10 * 24 * 60 * 60  # seconds in a month
-        one_year_in_seconds = 500 * 24 * 60 * 60  # seconds in a year
+    # Apply bandpass filter to main data if requested
+    if apply_filter:
+        with print_lock:
+            print(f"Applying bandpass filter ({1 / highcut / 86400:.1f}d - {1 / lowcut / 86400:.1f}d) to main data")
 
-        # Higher frequency (shorter period) = 1 month
-        highcut = 1 / one_month_in_seconds  # Hz
+        # Calculate sampling rate based on sampling parameter
+        try:
+            sampling_days = int(sampling.strip('D'))
+            sampling_rate = 1 / (sampling_days * 24 * 60 * 60)  # Convert to Hz
+        except (ValueError, AttributeError):
+            sampling_days = 1
+            sampling_rate = 1 / (24 * 60 * 60)  # Default to daily sampling (Hz)
 
-        # Lower frequency (longer period) = 1 year
-        lowcut = 1 / one_year_in_seconds  # Hz
+        with print_lock:
+            print(f"Sampling rate: {sampling_rate} Hz (every {sampling_days} days)")
 
         filtered_df = pd.DataFrame(index=df.index)
 
@@ -136,30 +164,38 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
             # Check if column exists
             if column in df.columns:
                 try:
-                    filtered_df[f'{column}'] = apply_bandpass_filter(
+                    filtered_df[column] = apply_bandpass_filter(
                         df[column].values,
                         lowcut,
                         highcut,
                         sampling_rate,
-                        order=2  # Lower order for stability with daily data
+                        order=filter_order
                     )
-                    print(f"Successfully filtered {column}")
+                    with print_lock:
+                        print(f"Successfully filtered {column}")
                 except Exception as e:
-                    print(f"Error filtering {column}: {e}")
-                    # Fallback to a simpler approach if filter fails
-                    filtered_df[f'{column}_filtered'] = df[column]
+                    with print_lock:
+                        print(f"Error filtering {column}: {e}")
+                    # Fallback to original values if filter fails
+                    filtered_df[column] = df[column]
             else:
-                print(f"Column {column} not found in DataFrame")
+                with print_lock:
+                    print(f"Column {column} not found in DataFrame")
 
-        df.loc[:,['dN', 'dE', 'dU']] = filtered_df.loc[:,['dN', 'dE', 'dU']]
+        # Update the original dataframe with filtered values
+        df.loc[:, ['dN', 'dE', 'dU']] = filtered_df.loc[:, ['dN', 'dE', 'dU']]
 
     # STEP 1: Handle the components to reduce from the original data
-    df_red, reduce_components_name = reduce_components_from_data(sta, df, reduce_components, sampling, subfolder)
+    df_red, reduce_components_name = reduce_components_from_data(
+        sta, df, reduce_components, sampling, apply_filter, filter_params
+    )
     if df_red is None:
         return None
 
     # STEP 2: Generate the comparison dataset by summing selected components
-    comp_df, compare_components_name = create_comparison_data(sta, compare_components, sampling, subfolder)
+    comp_df, compare_components_name = create_comparison_data(
+        sta, compare_components, sampling, apply_filter, filter_params
+    )
     if comp_df is None:
         return None
 
@@ -184,7 +220,8 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
     # Find common dates between df_red and comp_df
     common_dates = df_red.index.intersection(comp_df.index)
     with print_lock:
-        print(f"Found {len(common_dates)} common dates between the df-{reduce_components_name} and SUM-{compare_components_name} datasets.")
+        print(
+            f"Found {len(common_dates)} common dates between the df-{reduce_components_name} and SUM-{compare_components_name} datasets.")
 
     if len(common_dates) < 10:
         with print_lock:
@@ -208,7 +245,7 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
     reduction_percent = (1 - stats['rms'] / std_original_df) * 100
 
     # Calculate standard deviations for each individual component
-    component_stds = calculate_component_stds(sta, common_dates)
+    component_stds = calculate_component_stds(sta, common_dates, apply_filter, filter_params)
 
     # Create plots
     fig = create_comparison_plots(sta, df_common, comp_common, differences_dU, stats,
@@ -223,7 +260,8 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
         'reduce_components': reduce_components_name,
         'compare_components': compare_components_name,
         'stats': stats,
-        'reduction_percent': reduction_percent,  # Add this line
+        'reduction_percent': reduction_percent,
+        'filter_params': filter_params if apply_filter else None,
         'standard_deviations': {
             'original_df': std_original_df,
             'df_reduced': df_common['dU'].std(),
@@ -233,22 +271,28 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
     }
 
     # Create filename based on what's being compared
-    if 'BP' in subfolder:
-        output_file = os.path.join(output_dir, 'PKL', f'{solution}_{sta}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}_BP.PKL')
+    if apply_filter:
+        filter_str = f"_BP_{int(1 / highcut / 86400)}d_{int(1 / lowcut / 86400)}d"
+        output_file = os.path.join(output_dir, 'PKL',
+                                   f'{solution}_{sta}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}{filter_str}.PKL')
     else:
-        output_file = os.path.join(output_dir, 'PKL', f'{solution}_{sta}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}.PKL')
+        output_file = os.path.join(output_dir, 'PKL',
+                                   f'{solution}_{sta}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}.PKL')
+
     with file_lock:
         pd.to_pickle(comparison_data, output_file)
         with print_lock:
             print(f"Comparison data saved to {output_file}")
 
     # Save the figure as PNG as well
-    if 'BP' in subfolder:
+    if apply_filter:
+        filter_str = f"_BP_{int(1 / highcut / 86400)}d_{int(1 / lowcut / 86400)}d"
         fig_output = os.path.join(output_dir, 'TS_COMP',
-                                  f'{solution}_{sta}_{sampling}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}_BP.png')
+                                  f'{solution}_{sta}_{sampling}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}{filter_str}.png')
     else:
         fig_output = os.path.join(output_dir, 'TS_COMP',
                                   f'{solution}_{sta}_{sampling}_WO-{reduce_components_name}_VS_SUM-{compare_components_name}.png')
+
     with file_lock:
         plt.savefig(fig_output, dpi=200, bbox_inches='tight')
         with print_lock:
@@ -281,7 +325,8 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
 
     return comparison_data
 
-def reduce_components_from_data(sta, df, reduce_components, sampling, subfolder=''):
+
+def reduce_components_from_data(sta, df, reduce_components, sampling, apply_filter=False, filter_params=None):
     """
     Remove selected components from the original data.
 
@@ -295,6 +340,10 @@ def reduce_components_from_data(sta, df, reduce_components, sampling, subfolder=
         Dictionary indicating which components to remove
     sampling : str
         Sampling rate
+    apply_filter : bool
+        Whether to apply bandpass filter to the components
+    filter_params : dict
+        Dictionary containing bandpass filter parameters (lowcut, highcut, order)
 
     Returns:
     --------
@@ -309,14 +358,18 @@ def reduce_components_from_data(sta, df, reduce_components, sampling, subfolder=
     # Define all possible components
     components = ['A', 'O', 'S', 'H']
 
+    # Always use the CODE folder for component data (not CODE_BP)
     # Loop through each component
     for component in components:
         # Only process if this component is enabled in reduce_components
         if reduce_components.get(component, False):
-            file_path = f'EXT/ESMGFZLOADING/{subfolder}/{sta}_{component}_cf.PKL'
+            file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_{component}_cf.PKL'
             if os.path.exists(file_path):
                 files.append(file_path)
                 component_labels.append(component)
+            else:
+                with print_lock:
+                    print(f"Warning: Component file not found: {file_path}")
 
     # Convert index to date for consistency
     df.index = df.index.date
@@ -330,6 +383,43 @@ def reduce_components_from_data(sta, df, reduce_components, sampling, subfolder=
 
         # Convert index to date for consistency
         sum_df.index = sum_df.index.date
+
+        # Apply bandpass filter to component data if requested
+        if apply_filter and filter_params:
+            with print_lock:
+                print(f"Applying bandpass filter to reduction components: {component_labels}")
+
+            # Calculate sampling rate
+            try:
+                sampling_days = int(sampling.strip('D'))
+                sampling_rate = 1 / (sampling_days * 24 * 60 * 60)  # Convert to Hz
+            except (ValueError, AttributeError):
+                sampling_days = 1
+                sampling_rate = 1 / (24 * 60 * 60)  # Default to daily sampling (Hz)
+
+            lowcut = filter_params.get('lowcut', 0.0)
+            highcut = filter_params.get('highcut', 0.0)
+            filter_order = filter_params.get('order', 2)
+
+            # Apply the filter to each column
+            for column in ['dN', 'dE', 'dU']:
+                if column in sum_df.columns:
+                    try:
+                        sum_df[column] = apply_bandpass_filter(
+                            sum_df[column].values,
+                            lowcut,
+                            highcut,
+                            sampling_rate,
+                            order=filter_order
+                        )
+                        with print_lock:
+                            print(f"Successfully filtered {column} for reduction components")
+                    except Exception as e:
+                        with print_lock:
+                            print(f"Error filtering {column} for reduction components: {e}")
+                else:
+                    with print_lock:
+                        print(f"Column {column} not found in reduction components DataFrame")
 
         if sampling == '07D':
             sum_df[['gpsweek', 'doy']] = pd.DataFrame(
@@ -358,7 +448,8 @@ def reduce_components_from_data(sta, df, reduce_components, sampling, subfolder=
 
     return df_red, components_name
 
-def create_comparison_data(sta, compare_components, sampling, subfolder):
+
+def create_comparison_data(sta, compare_components, sampling, apply_filter=False, filter_params=None):
     """
     Create a comparison dataset by summing selected components.
 
@@ -370,6 +461,10 @@ def create_comparison_data(sta, compare_components, sampling, subfolder):
         Dictionary indicating which components to include in the sum
     sampling : str
         Sampling rate
+    apply_filter : bool
+        Whether to apply bandpass filter to the components
+    filter_params : dict
+        Dictionary containing bandpass filter parameters (lowcut, highcut, order)
 
     Returns:
     --------
@@ -384,14 +479,18 @@ def create_comparison_data(sta, compare_components, sampling, subfolder):
     # Define all possible components
     components = ['A', 'O', 'S', 'H', 'M', 'L']
 
+    # Always use the CODE folder for component data (not CODE_BP)
     # Loop through each component
     for component in components:
         # Only process if this component is enabled in compare_components
         if compare_components.get(component, False):
-            file_path = f'EXT/ESMGFZLOADING/{subfolder}/{sta}_{component}_cf.PKL'
+            file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_{component}_cf.PKL'
             if os.path.exists(file_path):
                 files.append(file_path)
                 component_labels.append(component)
+            else:
+                with print_lock:
+                    print(f"Warning: Component file not found: {file_path}")
 
     # Load and combine selected components
     if files:
@@ -402,6 +501,43 @@ def create_comparison_data(sta, compare_components, sampling, subfolder):
 
         # Convert index to date for consistency
         sum_df.index = sum_df.index.date
+
+        # Apply bandpass filter to component data if requested
+        if apply_filter and filter_params:
+            with print_lock:
+                print(f"Applying bandpass filter to comparison components: {component_labels}")
+
+            # Calculate sampling rate
+            try:
+                sampling_days = int(sampling.strip('D'))
+                sampling_rate = 1 / (sampling_days * 24 * 60 * 60)  # Convert to Hz
+            except (ValueError, AttributeError):
+                sampling_days = 1
+                sampling_rate = 1 / (24 * 60 * 60)  # Default to daily sampling (Hz)
+
+            lowcut = filter_params.get('lowcut', 0.0)
+            highcut = filter_params.get('highcut', 0.0)
+            filter_order = filter_params.get('order', 2)
+
+            # Apply the filter to each column
+            for column in ['dN', 'dE', 'dU']:
+                if column in sum_df.columns:
+                    try:
+                        sum_df[column] = apply_bandpass_filter(
+                            sum_df[column].values,
+                            lowcut,
+                            highcut,
+                            sampling_rate,
+                            order=filter_order
+                        )
+                        with print_lock:
+                            print(f"Successfully filtered {column} for comparison components")
+                    except Exception as e:
+                        with print_lock:
+                            print(f"Error filtering {column} for comparison components: {e}")
+                else:
+                    with print_lock:
+                        print(f"Column {column} not found in comparison components DataFrame")
 
         if sampling == '07D':
             sum_df[['gpsweek', 'doy']] = pd.DataFrame(
@@ -419,6 +555,7 @@ def create_comparison_data(sta, compare_components, sampling, subfolder):
         with print_lock:
             print(f"Warning: No components selected for comparison for station {sta}")
         return None, "None"
+
 
 def aggregate_gps_data(df):
     """
@@ -438,12 +575,13 @@ def aggregate_gps_data(df):
     # Group by gpsweek and calculate mean of displacement values
     agg_df = df.groupby('gpsweek')[['dU', 'dE', 'dN']].mean().reset_index()
 
-    agg_df['date'] = agg_df['gpsweek'].apply(lambda x: gpstime2dt(x,3)).dt.date
-    agg_df.drop('gpsweek',axis=1,inplace=True)
+    agg_df['date'] = agg_df['gpsweek'].apply(lambda x: gpstime2dt(x, 3)).dt.date
+    agg_df.drop('gpsweek', axis=1, inplace=True)
     # Set the datetime column as index
     agg_df = agg_df.set_index('date')
 
     return agg_df
+
 
 def load_station_data(sta, sampling, solution):
     """
@@ -478,7 +616,8 @@ def load_station_data(sta, sampling, solution):
             print(f"Error loading station data for {sta}: {str(e)}")
         return None
 
-def load_component_data(sta, component):
+
+def load_component_data(sta, component, apply_filter=False, filter_params=None):
     """
     Load a specific loading component data for a station.
 
@@ -488,6 +627,10 @@ def load_component_data(sta, component):
         Station name
     component : str
         Component name ('A', 'H', 'O', 'S')
+    apply_filter : bool
+        Whether to apply bandpass filter to the component
+    filter_params : dict
+        Dictionary containing bandpass filter parameters (lowcut, highcut, order)
 
     Returns:
     --------
@@ -495,10 +638,33 @@ def load_component_data(sta, component):
         DataFrame containing the component data, or None if file not found
     """
     try:
+        # Always load from CODE folder, not CODE_BP
         file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_{component}_cf.PKL'
         with file_lock:
             df = pd.read_pickle(file_path)
         df = df.rename({'R': 'dU', 'NS': 'dN', 'EW': 'dE'}, axis=1)
+
+        # Apply bandpass filter if requested
+        if apply_filter and filter_params:
+            lowcut = filter_params.get('lowcut', 0.0)
+            highcut = filter_params.get('highcut', 0.0)
+            filter_order = filter_params.get('order', 2)
+            sampling_rate = 1 / (24 * 60 * 60)  # Default to daily (Hz)
+
+            for column in ['dN', 'dE', 'dU']:
+                if column in df.columns:
+                    try:
+                        df[column] = apply_bandpass_filter(
+                            df[column].values,
+                            lowcut,
+                            highcut,
+                            sampling_rate,
+                            order=filter_order
+                        )
+                    except Exception as e:
+                        with print_lock:
+                            print(f"Error filtering {column} for component {component}: {e}")
+
         return df
     except FileNotFoundError:
         with print_lock:
@@ -508,6 +674,7 @@ def load_component_data(sta, component):
         with print_lock:
             print(f"Error loading component {component} for station {sta}: {str(e)}")
         return None
+
 
 def calculate_statistics(df1, df2, common_dates):
     """
@@ -559,7 +726,7 @@ def calculate_statistics(df1, df2, common_dates):
 
     # Calculate the components
     r = corr  # Correlation component (already calculated)
-    beta = 1#mean_sim / mean_obs  # Bias ratio
+    beta = 1  # Bias ratio
     alpha = std_sim / std_obs  # Variability ratio
 
     # Calculate KGE (2009 version)
@@ -590,7 +757,7 @@ def calculate_statistics(df1, df2, common_dates):
         'num_points': len(common_dates)
     }
 
-def calculate_component_stds(sta, common_dates):
+def calculate_component_stds(sta, common_dates, apply_filter=False, filter_params=None):
     """
     Calculate standard deviations for each individual component.
 
@@ -600,6 +767,10 @@ def calculate_component_stds(sta, common_dates):
         Station name
     common_dates : list
         List of common dates to use for calculation
+    apply_filter : bool
+        Whether to apply bandpass filter to the components
+    filter_params : dict
+        Dictionary containing bandpass filter parameters (lowcut, highcut, order)
 
     Returns:
     --------
@@ -608,9 +779,9 @@ def calculate_component_stds(sta, common_dates):
     """
     component_stds = {}
 
-    for component in ['A', 'O', 'S', 'H']:
+    for component in ['A', 'O', 'S', 'H', 'M', 'L']:
         try:
-            comp_df = load_component_data(sta, component)
+            comp_df = load_component_data(sta, component, apply_filter, filter_params)
             if comp_df is None:
                 component_stds[component] = np.nan
                 continue
@@ -639,6 +810,7 @@ def calculate_component_stds(sta, common_dates):
 
     return component_stds
 
+
 def create_comparison_plots(sta, df_common, comp_common, differences, stats, reduce_components_name,
                             compare_components_name, sampling, std_original_df):
     """
@@ -664,6 +836,11 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, red
         Sampling rate
     std_original_df : float
         Standard deviation of the original data
+
+    Returns:
+    --------
+    matplotlib.figure.Figure
+        Figure containing the comparison plots
     """
     import numpy as np
     import matplotlib.pyplot as plt
@@ -888,7 +1065,7 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, red
         ax_lomb.axvline(x=period_val, color='k', linestyle='--', alpha=0.5)
 
     # Highlight some common periods
-    common_periods = [365.25, 182.625]  # Annual, semi-annual, monthly
+    common_periods = [365.25, 182.625]  # Annual, semi-annual
     for period_val in common_periods:
         ax_lomb.axvline(x=period_val, color='gray', linestyle='--', alpha=0.5)
 
@@ -915,13 +1092,6 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, red
         f"RMS of differences: {stats['rms']:.2f} mm\n"
         f"Reduction: {reduction_percent:.1f}% of orig. std"
     )
-
-    ax_diff.text(0.02, 0.95, rms_diff_text,
-                 transform=ax_diff.transAxes,
-                 verticalalignment='top',
-                 horizontalalignment='left',
-                 bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.8),
-                 fontsize=9)
 
     # Lomb-Scargle periodogram for differences (middle row, right 1/3)
     ax_diff_lomb = fig.add_subplot(gs[1, 1])
@@ -971,10 +1141,6 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, red
     for period_val in [365.25, 182.625]:  # Annual and semi-annual
         ax_diff_lomb.axvline(x=period_val, color='k', linestyle='--', alpha=0.5)
 
-    # Highlight common periods
-    for period_val in common_periods:
-        ax_diff_lomb.axvline(x=period_val, color='gray', linestyle='--', alpha=0.5)
-
     # Histogram subplot (bottom left)
     ax_hist = fig.add_subplot(gs[2, 0])
     ax_hist.hist(differences.dropna(), bins=20, alpha=0.7, color='purple')
@@ -1016,43 +1182,47 @@ def main():
     sampling = '01D'
     solution = 'ITRF2020-IGS-RES'
     # solution = 'IGS1R03SNX'
+    stations = ['ZIMM']  # Leave empty list to process all available stations
 
-    subfolder = 'CODE_BP'
+    # Define bandpass filter parameters
+    # Set apply_filter to False to disable filtering entirely
+    filter_params = {
+        'apply_filter': True,
+        'lowcut': 1.0 / (400 * 24 * 60 * 60),  # Lower frequency (longer period): 400 days
+        'highcut': 1.0 / (30 * 24 * 60 * 60),  # Higher frequency (shorter period): 30 days
+        'order': 2  # Filter order (lower is more stable but less sharp cutoff)
+    }
 
-    # Select which components to remove from the original data (set to True to remove)
+    # Select which components to remove from the original data (set value to True to remove)
     reduce_components = {
-        'A': 1,  # Atmospheric loading
-        'O': 0,  # Ocean loading
-        'S': 0,  # Surface water loading
-        'H': 0   # Hydrological loading
+        'A': False,  # Atmospheric loading
+        'O': False,  # Ocean loading
+        'S': False,  # Surface water loading
+        'H': False  # Hydrological loading
     }
 
-    # Select which components to include in the comparison sum (set to True to include)
+    # Select which components to include in the comparison sum (set value to True to include)
     compare_components = {
-        'A': 0,  # Atmospheric loading
-        'O': 0,  # Ocean loading
-        'S': 0,  # Surface water loading
-        'H': 0,  # Hydrological loading old LSDM
-        'L': 1,  # Hydrological loading Lisflood
-        'M': 0,  # Hydrological loading LSDM
+        'A': False,  # Atmospheric loading
+        'O': False,  # Ocean loading
+        'S': False,  # Surface water loading
+        'H': False,  # Hydrological loading (old LSDM)
+        'L': False,  # Hydrological loading (Lisflood)
+        'M': True,  # Hydrological loading (LSDM)
     }
+
+    # Date range for analysis
+    start_date = datetime.date(2000, 1, 1)  # Set to None to use all available data
+    end_date = datetime.date(2020, 12, 31)  # Set to None to use all available data
 
     # Determine the number of workers (threads)
-    max_workers = 1#max(1, os.cpu_count() - 1)
+    max_workers = 1  # Increase for parallel processing, e.g., os.cpu_count() - 1
 
-    # Check if specific stations are provided as command line arguments
-    if len(sys.argv) > 1:
-        stations = sys.argv[1:]
-        with print_lock:
-            print(f"Processing specified stations: {', '.join(stations)}")
-    else:
-        # Find all available stations
-        stations = find_stations(solution, sampling)#[978:]
+    # Find all available stations if none specified
+    if len(stations) == 0:
+        stations = find_stations(solution, sampling)
         with print_lock:
             print(f"Found {len(stations)} stations: {', '.join(stations)}")
-
-    start_date = datetime.date(2000,1,1)  # Set to a date like datetime.date(2010, 1, 1) to specify
-    end_date = datetime.date(2020,12,31)   # Set to a date like datetime.date(2015, 12, 31) to specify
 
     # Prepare output directory
     reduce_str = "".join([k for k, v in reduce_components.items() if v])
@@ -1069,12 +1239,19 @@ def main():
         print(f"Reducing original data by components: {reduce_str if reduce_str else 'None'}")
         print(f"Comparing with summed components: {compare_str if compare_str else 'None'}")
 
+        if filter_params['apply_filter']:
+            low_period = int(1 / filter_params['lowcut'] / 86400)
+            high_period = int(1 / filter_params['highcut'] / 86400)
+            print(f"Applying bandpass filter: {high_period}-{low_period} days (order {filter_params['order']})")
+
     results = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Create arguments for each station
-        # Create arguments for each station
-        args_list = [(sta, sampling, solution, reduce_components, compare_components, subfolder, start_date, end_date) for sta in
-                     stations]
+        args_list = [
+            (sta, sampling, solution, reduce_components, compare_components,
+             filter_params, start_date, end_date) for sta in stations
+        ]
+
         # Submit all tasks and get Future objects
         future_to_station = {
             executor.submit(process_station_wrapper, args): args[0]
@@ -1109,8 +1286,11 @@ def main():
         print(f"Successfully processed {len(results)} out of {len(stations)} stations.")
 
     # Create a summary of all stations
-    if "BP" in subfolder:
-        summary_file = f'{out_path}/{solution}_ALL_STATIONS_WO-{reduce_str}_VS_SUM-{compare_str}_BP_SUMMARY.PKL'
+    if filter_params['apply_filter']:
+        low_period = int(1 / filter_params['lowcut'] / 86400)
+        high_period = int(1 / filter_params['highcut'] / 86400)
+        filter_str = f"_BP_{high_period}d_{low_period}d"
+        summary_file = f'{out_path}/{solution}_ALL_STATIONS_WO-{reduce_str}_VS_SUM-{compare_str}{filter_str}_SUMMARY.PKL'
     else:
         summary_file = f'{out_path}/{solution}_ALL_STATIONS_WO-{reduce_str}_VS_SUM-{compare_str}_SUMMARY.PKL'
 
@@ -1121,8 +1301,9 @@ def main():
             'correlation': result['stats']['correlation'],
             'variance_explained': result['stats']['variance_explained'],
             'rms': result['stats']['rms'],
-            'reduction_percent': result['reduction_percent'],  # Add this line
+            'reduction_percent': result['reduction_percent'],
             'num_points': result['stats']['num_points'],
+            'filter_params': result.get('filter_params'),
             'std': {
                 'original': result['standard_deviations']['original_df'],
                 'reduced': result['standard_deviations']['df_reduced'],
@@ -1140,3 +1321,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
