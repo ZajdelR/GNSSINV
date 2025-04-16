@@ -17,7 +17,8 @@ plt.ioff()
 
 def extract_filter_info(filename):
     """
-    Extract bandpass filter parameters from filename.
+    Extract filter parameters from filename.
+    Supports band-pass (BP), low-pass (LP), and high-pass (HP) filter naming conventions.
 
     Parameters:
     -----------
@@ -29,19 +30,47 @@ def extract_filter_info(filename):
     dict or None
         Dictionary with filter parameters or None if no filter info in filename
     """
-    # Look for BP_XXd_YYYd pattern in filename
+    import re
+
+    # Look for Band-Pass filter pattern: BP_XXd_YYYd
     bp_match = re.search(r'BP_(\d+)d_(\d+)d', filename)
     if bp_match:
         high_period = int(bp_match.group(1))  # Higher frequency (shorter period)
         low_period = int(bp_match.group(2))  # Lower frequency (longer period)
         return {
+            'filter_type': 'bandpass',
             'high_period': high_period,
             'low_period': low_period,
             'is_filtered': True
         }
+
+    # Look for Low-Pass filter pattern: LP_XXXd
+    lp_match = re.search(r'LP_(\d+)d', filename)
+    if lp_match:
+        high_period = int(lp_match.group(1))  # Higher frequency (shorter period)
+        return {
+            'filter_type': 'lowpass',
+            'high_period': high_period,
+            'low_period': None,
+            'is_filtered': True
+        }
+
+    # Look for High-Pass filter pattern: HP_XXXd
+    hp_match = re.search(r'HP_(\d+)d', filename)
+    if hp_match:
+        low_period = int(hp_match.group(1))  # Lower frequency (longer period)
+        return {
+            'filter_type': 'highpass',
+            'high_period': None,
+            'low_period': low_period,
+            'is_filtered': True
+        }
+
+    # Legacy pattern for older files
     elif '_BP.' in filename:
         # Old format with just BP suffix
         return {
+            'filter_type': 'bandpass',
             'is_filtered': True,
             'high_period': None,
             'low_period': None
@@ -50,7 +79,91 @@ def extract_filter_info(filename):
         return None
 
 
+def create_filter_subtitle(filter_info):
+    """
+    Create a descriptive subtitle based on filter information.
+
+    Parameters:
+    -----------
+    filter_info : dict
+        Dictionary containing filter parameters
+
+    Returns:
+    --------
+    str
+        Formatted filter subtitle
+    """
+    if not filter_info or not filter_info.get('is_filtered', False):
+        return ""
+
+    filter_type = filter_info.get('filter_type', 'bandpass')
+    high_period = filter_info.get('high_period')
+    low_period = filter_info.get('low_period')
+
+    if filter_type == 'bandpass' and high_period and low_period:
+        return f"Band-pass filtered ({high_period}-{low_period} days), "
+    elif filter_type == 'lowpass' and high_period:
+        return f"Low-pass filtered (>{high_period} days), "
+    elif filter_type == 'highpass' and low_period:
+        return f"High-pass filtered (<{low_period} days), "
+    else:
+        return "Filtered, "
+
+
+def create_filter_filename(filter_info):
+    """
+    Create a filename suffix based on filter information.
+
+    Parameters:
+    -----------
+    filter_info : dict
+        Dictionary containing filter parameters
+
+    Returns:
+    --------
+    str
+        Formatted filter string for filenames
+    """
+    if not filter_info or not filter_info.get('is_filtered', False):
+        return ""
+
+    filter_type = filter_info.get('filter_type', 'bandpass')
+    high_period = filter_info.get('high_period')
+    low_period = filter_info.get('low_period')
+
+    if filter_type == 'bandpass' and high_period and low_period:
+        return f"_BP_{high_period}d_{low_period}d"
+    elif filter_type == 'lowpass' and high_period:
+        return f"_LP_{high_period}d"
+    elif filter_type == 'highpass' and low_period:
+        return f"_HP_{low_period}d"
+    else:
+        return "_FILTERED"
+
+
 def load_station_results(comp_dir, pattern='*_WO-*_VS_*.PKL', exclude_pattern='*SUMMARY.PKL'):
+    """
+    Load station comparison data from pickle files.
+    Updated to properly handle different filter types (BP, LP, HP).
+
+    Parameters:
+    -----------
+    comp_dir : str
+        Directory containing comparison pickle files
+    pattern : str
+        Glob pattern to match files
+    exclude_pattern : str
+        Glob pattern for files to exclude
+
+    Returns:
+    --------
+    tuple
+        (compiled_data, sum_components, compare_with, solution, filter_info)
+    """
+    import glob
+    import os
+    import pandas as pd
+
     all_files = glob.glob(os.path.join(comp_dir, pattern))
 
     if exclude_pattern:
@@ -93,17 +206,40 @@ def load_station_results(comp_dir, pattern='*_WO-*_VS_*.PKL', exclude_pattern='*
                 if 'filter_params' in data and data['filter_params'] is not None:
                     if filter_info is None:
                         # Use filter params from data if not extracted from filename
-                        lowcut = data['filter_params'].get('lowcut', 0)
-                        highcut = data['filter_params'].get('highcut', 0)
-                        if lowcut > 0 and highcut > 0:
-                            # Convert Hz to days
-                            high_period = int(1 / highcut / 86400)
-                            low_period = int(1 / lowcut / 86400)
-                            filter_info = {
-                                'is_filtered': True,
-                                'high_period': high_period,
-                                'low_period': low_period
-                            }
+                        filter_params = data['filter_params']
+                        if filter_params.get('apply_filter', False):
+                            # Check for different filter types
+                            lowcut = filter_params.get('lowcut')
+                            highcut = filter_params.get('highcut')
+
+                            if lowcut is not None and highcut is not None:
+                                # Band-pass filter
+                                high_period = int(1 / highcut / 86400)
+                                low_period = int(1 / lowcut / 86400)
+                                filter_info = {
+                                    'is_filtered': True,
+                                    'filter_type': 'bandpass',
+                                    'high_period': high_period,
+                                    'low_period': low_period
+                                }
+                            elif lowcut is not None and highcut is None:
+                                # High-pass filter
+                                low_period = int(1 / lowcut / 86400)
+                                filter_info = {
+                                    'is_filtered': True,
+                                    'filter_type': 'highpass',
+                                    'high_period': None,
+                                    'low_period': low_period
+                                }
+                            elif lowcut is None and highcut is not None:
+                                # Low-pass filter
+                                high_period = int(1 / highcut / 86400)
+                                filter_info = {
+                                    'is_filtered': True,
+                                    'filter_type': 'lowpass',
+                                    'high_period': high_period,
+                                    'low_period': None
+                                }
 
                 compiled_data[sta] = data
 
@@ -199,9 +335,12 @@ def extract_statistics_for_mapping(compiled_data, min_num_points=30, min_h_std=0
     return mapping_stats, filtered_out_stations
 
 
-def visualize_variance_explained_map(comp_dir, output_dir=None, pattern='*_WO-*_VS_*.PKL', min_num_points=30,
-                                     min_h_std=0.0,
+def visualize_variance_explained_map(comp_dir, output_dir=None, pattern='*_WO-*_VS_*.PKL', min_num_points=30, min_h_std=0.0,
                                      figsize=(14, 10), dpi=300, cmap='viridis'):
+    """
+    Create a map visualizing the variance explained at different stations.
+    Updated to handle different filter types (BP, LP, HP).
+    """
     if output_dir is None:
         output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS")
 
@@ -221,7 +360,7 @@ def visualize_variance_explained_map(comp_dir, output_dir=None, pattern='*_WO-*_
     print(f"Excluded {len(filtered_out_stations)} stations")
 
     try:
-        station_coords = pd.read_pickle('EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.PKL')
+        station_coords = pd.read_pickle('EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.pkl')
         print(f"Loaded coordinates for {len(station_coords)} stations")
         print(f"Coordinate columns: {station_coords.columns.tolist()}")
     except Exception as e:
@@ -332,16 +471,8 @@ def visualize_variance_explained_map(comp_dir, output_dir=None, pattern='*_WO-*_
 
     title = f'Variance in {solution} Explained by {compare_with} (without {sum_components})'
 
-    # Add bandpass filter information to title if available
-    filter_subtitle = ""
-    if filter_info and filter_info.get('is_filtered', False):
-        high_period = filter_info.get('high_period')
-        low_period = filter_info.get('low_period')
-        if high_period and low_period:
-            filter_subtitle = f"Bandpass filtered ({high_period}-{low_period} days), "
-        else:
-            filter_subtitle = "Bandpass filtered, "
-
+    # Create filter subtitle using the updated helper function
+    filter_subtitle = create_filter_subtitle(filter_info)
     subtitle = f"{filter_subtitle}Stations with at least {min_num_points} data points and H std ≥ {min_h_std} mm"
     ax.set_title(f'{title}\n{subtitle}', fontsize=14)
 
@@ -362,15 +493,8 @@ def visualize_variance_explained_map(comp_dir, output_dir=None, pattern='*_WO-*_
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
-        # Add filter info to filename if available
-        filter_str = ""
-        if filter_info and filter_info.get('is_filtered', False):
-            high_period = filter_info.get('high_period')
-            low_period = filter_info.get('low_period')
-            if high_period and low_period:
-                filter_str = f"_BP_{high_period}d_{low_period}d"
-            else:
-                filter_str = "_BP"
+        # Create filter string for filename using the updated helper function
+        filter_str = create_filter_filename(filter_info)
 
         output_file = os.path.join(output_dir,
                                    f'{solution}_variance_explained_map_WO-{sum_components}_VS_{compare_with}{filter_str}.png')
@@ -390,10 +514,13 @@ def visualize_variance_explained_map(comp_dir, output_dir=None, pattern='*_WO-*_
 
     return fig, plot_df
 
-
 def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_percent=10,
                                  figsize=(6, 8), output_dir=None, solution=None, sum_components=None,
                                  compare_with=None, filter_info=None, dpi=300, top=True):
+    """
+    Create a bar plot showing top or bottom stations by a specific metric.
+    Updated to handle different filter types (BP, LP, HP).
+    """
     if plot_df is None or len(plot_df) == 0:
         print("No data available for bar plot")
         return None
@@ -429,14 +556,10 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
         title += f' for {solution}'
         subtitle = f'without {sum_components}, compared with {compare_with}'
 
-        # Add filter info to subtitle if available
-        if filter_info and filter_info.get('is_filtered', False):
-            high_period = filter_info.get('high_period')
-            low_period = filter_info.get('low_period')
-            if high_period and low_period:
-                subtitle += f", BP {high_period}-{low_period} days"
-            else:
-                subtitle += ", BP filtered"
+        # Add filter info to subtitle using the updated helper function
+        filter_info_text = create_filter_subtitle(filter_info).strip(', ')
+        if filter_info_text:
+            subtitle += f", {filter_info_text}"
 
         title += f'\n({subtitle})'
 
@@ -452,15 +575,8 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
     if output_dir and solution and compare_with:
         os.makedirs(output_dir, exist_ok=True)
 
-        # Add filter info to filename if available
-        filter_str = ""
-        if filter_info and filter_info.get('is_filtered', False):
-            high_period = filter_info.get('high_period')
-            low_period = filter_info.get('low_period')
-            if high_period and low_period:
-                filter_str = f"_BP_{high_period}d_{low_period}d"
-            else:
-                filter_str = "_BP"
+        # Create filter string for filename using the updated helper function
+        filter_str = create_filter_filename(filter_info)
 
         metric_str = '_'.join(metric.split('_'))
         if top:
@@ -474,7 +590,6 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
         print(f"Bar plot saved to {output_file}")
 
     return fig
-
 
 def create_variance_ratio_map(comp_dir, output_dir=None, pattern='*_WO-*_VS_*.PKL', min_num_points=30, min_h_std=0.0,
                               figsize=(14, 10), dpi=300, cmap='coolwarm'):
@@ -494,7 +609,7 @@ def create_variance_ratio_map(comp_dir, output_dir=None, pattern='*_WO-*_VS_*.PK
         return None, None
 
     try:
-        station_coords = pd.read_pickle('EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.PKL')
+        station_coords = pd.read_pickle('EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.pkl')
     except Exception as e:
         print(f"Error loading station coordinates: {str(e)}")
         return None, None
@@ -677,7 +792,7 @@ def create_correlation_map(comp_dir, value_to_plot, output_dir=None, pattern='*_
         return None, None
 
     try:
-        station_coords = pd.read_pickle('EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.PKL')
+        station_coords = pd.read_pickle('EXT/PROCESSINS_SUPPLEMENTS/ALL_STATIONS_LATLON.pkl')
     except Exception as e:
         print(f"Error loading station coordinates: {str(e)}")
         return None, None
@@ -844,6 +959,7 @@ def create_correlation_map(comp_dir, value_to_plot, output_dir=None, pattern='*_
     return fig, plot_df
 
 # Example usage
+# Example usage with updated pattern matching
 if __name__ == "__main__":
     # Define parameters
     solution = 'ITRF2020-IGS-RES'
@@ -851,84 +967,108 @@ if __name__ == "__main__":
     sampling = '01D'
 
     for reduction in ['A']:
-        for vs in ['M','L']:  # Component to compare with
+        for vs in ['L']:  # Component to compare with
 
             # Base directory
             comp_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL'
 
-            # Define filter criteria parameters
-            filter_period = "30d_400d"  # Set to None for no bandpass filter
+            filter_patterns = [
+                #None,  # No filter
+                "BP_30d_400d",  # Band-pass filter
+                #"LP_400d",  # Low-pass filter
+                #"HP_30d"  # High-pass filter
+            ]
 
-            # Create pattern for file matching
-            if filter_period:
-                pattern = f'*_WO-{reduction}_VS_SUM-{vs}_BP_{filter_period}.PKL'
-                output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'WITH_BP')
-            else:
-                pattern = f'*_WO-{reduction}_VS_SUM-{vs}.PKL'
-                output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'NO_BP')
+            for filter_pattern in filter_patterns:
+                # Create pattern for file matching
+                if filter_pattern is None:
+                    pattern = f'*_WO-{reduction}_VS_SUM-{vs}.PKL'
+                    output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'NO_FILTER')
+                elif filter_pattern.startswith("BP_"):
+                    pattern = f'*_WO-{reduction}_VS_SUM-{vs}_{filter_pattern}.PKL'
+                    output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'BANDPASS')
+                elif filter_pattern.startswith("LP_"):
+                    pattern = f'*_WO-{reduction}_VS_SUM-{vs}_{filter_pattern}.PKL'
+                    output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'LOWPASS')
+                elif filter_pattern.startswith("HP_"):
+                    pattern = f'*_WO-{reduction}_VS_SUM-{vs}_{filter_pattern}.PKL'
+                    output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'HIGHPASS')
 
-            # Station filtering criteria
-            min_num_points = 1000
-            min_h_std = 1.5  # 1.5 mm minimum standard deviation for H component
+                # Station filtering criteria
+                min_num_points = 1000
+                min_h_std = 0.5  # 1.5 mm minimum standard deviation for H component
 
-            print(f"Using parameters: min_num_points={min_num_points}, min_h_std={min_h_std}")
-            print(f"Pattern: {pattern}")
-            print(f"Output directory: {output_dir}")
+                print(f"\n===== Processing: {filter_pattern if filter_pattern else 'NO FILTER'} =====")
+                print(f"Using parameters: min_num_points={min_num_points}, min_h_std={min_h_std}")
+                print(f"Pattern: {pattern}")
+                print(f"Output directory: {output_dir}")
 
-            # First, load data to get filter info
-            compiled_data, sum_components, compare_with, solution, filter_info = load_station_results(comp_dir, pattern)
-            if filter_info:
-                print("Filter info detected:")
-                for key, value in filter_info.items():
-                    print(f"  {key}: {value}")
+                # First, load data to get filter info
+                compiled_data, sum_components, compare_with, solution, filter_info = load_station_results(comp_dir,
+                                                                                                          pattern)
 
-            # Create the variance explained map
-            print("\nCreating variance explained map...")
-            fig1, plot_df1 = visualize_variance_explained_map(comp_dir, output_dir, pattern, min_num_points, min_h_std,
-                                                              cmap='Greens')
+                if not compiled_data or len(compiled_data) == 0:
+                    print(f"No data found for pattern: {pattern}. Skipping...")
+                    continue
 
-            # Create the variance ratio map
-            print("\nCreating variance ratio map...")
-            fig2, plot_df2 = create_variance_ratio_map(comp_dir, output_dir, pattern, min_num_points, min_h_std)
+                if filter_info:
+                    print("Filter info detected:")
+                    for key, value in filter_info.items():
+                        print(f"  {key}: {value}")
 
-            # Create the correlation map
-            print("\nCreating correlation map...")
-            fig3, plot_df3 = create_correlation_map(comp_dir, 'correlation', output_dir, pattern, min_num_points, min_h_std,
-                                                    cmap='coolwarm')
+                # Create the variance explained map
+                print("\nCreating variance explained map...")
+                fig1, plot_df1 = visualize_variance_explained_map(comp_dir, output_dir, pattern, min_num_points,
+                                                                  min_h_std,
+                                                                  cmap='Greens')
 
-            # Create KGE map
-            print("\nCreating KGE map...")
-            fig3a, plot_df3a = create_correlation_map(comp_dir, 'kge2012', output_dir, pattern, min_num_points, min_h_std,
-                                                      cmap='coolwarm')
+                # Create the variance ratio map
+                print("\nCreating variance ratio map...")
+                fig2, plot_df2 = create_variance_ratio_map(comp_dir, output_dir, pattern, min_num_points, min_h_std)
 
-            fig3c, plot_df3c = create_correlation_map(comp_dir, 'kge_gamma', output_dir, pattern, min_num_points, min_h_std,
-                                                      cmap='coolwarm')
+                # Create the correlation map
+                print("\nCreating correlation map...")
+                fig3, plot_df3 = create_correlation_map(comp_dir, 'correlation', output_dir, pattern, min_num_points,
+                                                        min_h_std,
+                                                        cmap='coolwarm')
 
-            # Create standard deviation reduction map
-            print("\nCreating standard deviation reduction map...")
-            fig3b, plot_df3b = create_correlation_map(comp_dir, 'std_reduction', output_dir, pattern, min_num_points, min_h_std,
-                                                      cmap='coolwarm')
+                # Create KGE map
+                print("\nCreating KGE map...")
+                fig3a, plot_df3a = create_correlation_map(comp_dir, 'kge2012', output_dir, pattern, min_num_points,
+                                                          min_h_std,
+                                                          cmap='coolwarm')
 
-            # Create bar plot for top stations with highest variance explained
-            print("\nCreating top stations by variance explained bar plot...")
-            fig4 = create_top_stations_bar_plot(plot_df1, metric='variance_explained', top_percent=5,
-                                                output_dir=output_dir, solution=solution,
-                                                sum_components=sum_components, compare_with=compare_with,
-                                                filter_info=filter_info)
+                fig3c, plot_df3c = create_correlation_map(comp_dir, 'kge_gamma', output_dir, pattern, min_num_points,
+                                                          min_h_std,
+                                                          cmap='coolwarm')
 
-            # Create bar plot for top stations with highest correlation
-            print("\nCreating top stations by correlation bar plot...")
-            fig5 = create_top_stations_bar_plot(plot_df3a, metric='kge2012', top_percent=5,
-                                                output_dir=output_dir, solution=solution,
-                                                sum_components=sum_components, compare_with=compare_with,
-                                                filter_info=filter_info)
+                # Create standard deviation reduction map
+                print("\nCreating standard deviation reduction map...")
+                fig3b, plot_df3b = create_correlation_map(comp_dir, 'std_reduction', output_dir, pattern,
+                                                          min_num_points, min_h_std,
+                                                          cmap='coolwarm')
 
-            fig6 = create_top_stations_bar_plot(plot_df3a, metric='kge2012', top_percent=5,
-                                                output_dir=output_dir, solution=solution,
-                                                sum_components=sum_components, compare_with=compare_with,
-                                                filter_info=filter_info, top=False)
+                # Create bar plot for top stations with highest variance explained
+                print("\nCreating top stations by variance explained bar plot...")
+                fig4 = create_top_stations_bar_plot(plot_df1, metric='variance_explained', top_percent=5,
+                                                    output_dir=output_dir, solution=solution,
+                                                    sum_components=sum_components, compare_with=compare_with,
+                                                    filter_info=filter_info)
 
-            print("\nAll visualizations completed successfully!")
-            # Close all figures to free memory
-            plt.close('all')
+                # Create bar plot for top stations with highest KGE
+                print("\nCreating top stations by KGE bar plot...")
+                fig5 = create_top_stations_bar_plot(plot_df3a, metric='kge2012', top_percent=5,
+                                                    output_dir=output_dir, solution=solution,
+                                                    sum_components=sum_components, compare_with=compare_with,
+                                                    filter_info=filter_info)
 
+                fig6 = create_top_stations_bar_plot(plot_df3a, metric='kge2012', top_percent=5,
+                                                    output_dir=output_dir, solution=solution,
+                                                    sum_components=sum_components, compare_with=compare_with,
+                                                    filter_info=filter_info, top=False)
+
+                print("\nAll visualizations completed successfully for this filter type!")
+                # Close all figures to free memory
+                plt.close('all')
+
+    print("\nEntire visualization process completed!")

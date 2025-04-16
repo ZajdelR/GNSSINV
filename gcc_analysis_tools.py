@@ -109,51 +109,83 @@ def reverse_cf_cm(df):
     return df
 
 
-def apply_bandpass_filter(signal, lowcut, highcut, sampling_rate, order=4):
+import numpy as np
+from scipy.signal import butter, sosfiltfilt
+from scipy.fft import fft, ifft, fftfreq
+
+def fft_notch_filter(signal, target_freq, sampling_rate, width=0.1):
+    n = len(signal)
+    freqs = fftfreq(n, d=1 / sampling_rate)
+    fft_vals = fft(signal)
+
+    # Remove both positive and negative target frequencies
+    notch_mask = np.abs(freqs - target_freq) < (width * target_freq)
+    fft_vals[notch_mask] = 0
+    fft_vals[np.abs(freqs + target_freq) < (width * target_freq)] = 0
+
+    return np.real(ifft(fft_vals))
+
+
+def apply_bandpass_filter(signal, lowcut, highcut, sampling_rate, order=4, notch_width=0.1):
     """
-    Apply a Butterworth band-pass filter to the time-series data.
+    Apply Butterworth filter to the signal. Adds FFT-notch to low-pass to remove annual signal.
 
     Parameters:
-    signal (array-like): The time-series data to filter.
-    lowcut (float): The lower cutoff frequency for the filter (in Hz).
-    highcut (float): The higher cutoff frequency for the filter (in Hz).
-    sampling_rate (float): The sampling rate of the data (in Hz).
-    order (int): The order of the filter (default is 4).
+        signal (array-like): Time-series data.
+        lowcut (float or None): Low cutoff frequency (Hz).
+        highcut (float or None): High cutoff frequency (Hz).
+        sampling_rate (float): Sampling rate in Hz.
+        order (int): Butterworth filter order.
+        notch_width (float): Fractional width of FFT notch (low-pass only).
 
     Returns:
-    array-like: The filtered time-series data after applying the band-pass filter.
+        array-like: Filtered signal.
     """
-    # Handle NaN values by interpolation
+
     signal_copy = np.copy(signal)
     nan_indices = np.isnan(signal_copy)
 
     if np.any(nan_indices):
-        # Create an array of indices
         indices = np.arange(len(signal_copy))
-        # Get the indices of non-NaN values
         valid_indices = indices[~nan_indices]
-        # Get the non-NaN values
         valid_values = signal_copy[~nan_indices]
-        # Interpolate NaN values
-        if len(valid_values) > 0:  # Make sure there's at least one valid value
+        if len(valid_values) > 0:
             signal_copy[nan_indices] = np.interp(indices[nan_indices], valid_indices, valid_values)
 
-    nyquist = 0.5 * sampling_rate  # Nyquist frequency
-    low = lowcut / nyquist
-    high = highcut / nyquist
+    nyquist = 0.5 * sampling_rate
 
-    # Ensure the frequencies are within valid range (0 to 1)
-    low = max(0.0001, min(low, 0.9999))
-    high = max(low + 0.0001, min(high, 0.9999))
+    if lowcut is not None and highcut is not None:
+        # Band-pass Butterworth
+        low = max(0.0001, min(lowcut / nyquist, 0.9999))
+        high = max(low + 0.0001, min(highcut / nyquist, 0.9999))
+        sos = butter(order, [low, high], btype='band', analog=False, output='sos')
+        filtered_signal = sosfiltfilt(sos, signal_copy)
 
-    # For daily data with month to year band, a lower order filter may work better
-    b, a = butter(order, [low, high], btype='band', analog=False)  # Get filter coefficients
-    filtered_signal = filtfilt(b, a, signal_copy)  # Apply forward-backward filtering for zero-phase filtering
+    elif lowcut is not None and highcut is None:
+        # High-pass Butterworth
+        low = max(0.0001, min(lowcut / nyquist, 0.9999))
+        sos = butter(order, low, btype='high', analog=False, output='sos')
+        filtered_signal = sosfiltfilt(sos, signal_copy)
 
-    # Restore NaN values in the original positions
+    elif lowcut is None and highcut is not None:
+        # Low-pass Butterworth + FFT-notch
+        high = max(0.0001, min(highcut / nyquist, 0.9999))
+        sos = butter(order, high, btype='low', analog=False, output='sos')
+        lowpassed = sosfiltfilt(sos, signal_copy)
+
+        # Uncomment if you want to force diminish annual signal
+        # annual_freq = 1 / (365.25 * 24 * 60 * 60)  # Annual in Hz
+        # filtered_signal = fft_notch_filter(lowpassed, annual_freq, sampling_rate, width=notch_width)
+
+        filtered_signal = lowpassed
+
+    else:
+        return signal  # No filtering
+
     filtered_signal[nan_indices] = np.nan
-
     return filtered_signal
+
+
 
 def apply_lowpass_filter(signal, cutoff_frequency, sampling_rate, order=4):
     """
