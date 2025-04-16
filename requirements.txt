@@ -1,7 +1,7 @@
 # Main dependencies
 numpy==2.1.0
 pandas==2.2.3
-matplotlib==3.9.1
+matplotlib==3.10.1
 cartopy==0.23.0
 scipy==1.14.0
 xarray==2024.7.0
@@ -14,20 +14,4 @@ psutil>=5.9.0
 statsmodels==0.14.4
 pyproj==3.6.1
 pooch==1.8.2
-
-# Dev dependencies (optional, can be in dev-requirements.txt)
-pytest==7.0.0
-flake8==6.0.0
-black==23.1.0
-ipykernel==6.20.0
-jupyterlab==4.0.0
-pylint==3.0.0
-
-# Optional dependencies (add these if needed)
-pyshtools==4.13.1
 seaborn==0.13.2
-joblib==1.4.2
-scikit-learn==1.5.1
-colorlog==6.8.2
-pathvalidate==3.2.0
-openpyxl==3.1.5

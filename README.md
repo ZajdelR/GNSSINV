@@ -27,14 +27,14 @@ This repository contains a collection of Python scripts for analyzing global geo
    ```
 2.b **Install dependencies using simple pip install:**
 ```bash
-    # Create a virtual environment
-    python3 -m venv venv
+# Create a virtual environment
+python3 -m venv venv
 
-    # Activate venv
-    source venv/bin/activate
+# Activate venv
+source venv/bin/activate
 
-    # Install dependencies
-    pip install -r requirements.txt
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 3. **Verifying installation:**
