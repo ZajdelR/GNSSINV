@@ -26,7 +26,7 @@ This repository contains a collection of Python scripts for analyzing global geo
    poetry shell
    ```
 2.b **Install dependencies using simple pip install:**
-    ```bash
+```bash
     # Create a virtual environment
     python3 -m venv venv
 
@@ -35,7 +35,7 @@ This repository contains a collection of Python scripts for analyzing global geo
 
     # Install dependencies
     pip install -r requirements.txt
-    ```
+```
 
 3. **Verifying installation:**
    After activating the Poetry environment, you can verify that everything is working correctly by running:
