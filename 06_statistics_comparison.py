@@ -142,6 +142,9 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
     # To avoid division by zero, use the maximum of the two values for normalization
     max_vals = np.maximum(df1[column_name], df2[column_name])
 
+    # Avoid division by zero for max_vals that are zero
+    max_vals = np.where(max_vals == 0, 1, max_vals)
+
     # Calculate percentage difference
     # We reverse the sign if higher_is_better is True
     sign_factor = -1 if higher_is_better else 1
@@ -265,7 +268,7 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
         f"Mean diff ({file1_label}-{file2_label}): {mean_diff:.4f}"
     )
 
-    plt.figtext(0.02, 0.05, stats_text, fontsize=10,
+    plt.figtext(0.02, 0.15, stats_text, fontsize=10,
                 bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
 
     plt.tight_layout()
@@ -298,16 +301,19 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
 
     ax_pct.set_global()
 
-    # Set fixed colorbar limits from -100 to 100
-    vmin = -15
-    vmax = 15
-
-    # Get actual min/max for informational purposes
+    # Set fixed colorbar limits based on actual data range
+    # Get actual min/max for setting reasonable colorbar limits
     actual_min = df1['pct_improvement'].min()
     actual_max = df1['pct_improvement'].max()
 
+    # Calculate reasonable vmin and vmax based on data
+    # Use the max absolute value to create a symmetric range, but cap at ±15%
+    max_abs_val = min(15, max(abs(actual_min), abs(actual_max)))
+    vmin = -max_abs_val
+    vmax = max_abs_val
+
     # Use a diverging colormap with white at zero
-    cmap = plt.cm.RdBu_r  # Red-Blue reversed (negative: blue, positive: red)
+    cmap_name = 'RdBu_r'  # Red-Blue reversed (negative: blue, positive: red)
 
     # Set up normalization for the colormap
     # Use TwoSlopeNorm to center the colormap at zero with fixed limits
@@ -323,16 +329,32 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
         edgecolor='black',
         linewidth=0.5,
         zorder=10,
-        cmap=cmap,
+        cmap=cmap_name,
         norm=norm
     )
 
-    # Add colorbar with fixed limits
-    cbar = plt.colorbar(scatter_pct, orientation='horizontal', pad=0.05, shrink=0.75)
+    # Add colorbar with fixed limits - FIXED VERSION
+    cbar = plt.colorbar(scatter_pct, ax=ax_pct, orientation='horizontal', pad=0.05, shrink=0.75)
     cbar.set_label(f'Percentage Improvement (%) - Negative: {file1_label} better, Positive: {file2_label} better')
 
-    # Ensure the colorbar ticks are set properly to show the range
-    cbar.set_ticks([-100, -75, -50, -25, 0, 25, 50, 75, 100])
+    # Set appropriate tick marks based on the range
+    if max_abs_val <= 5:
+        ticks = [-5, -2.5, 0, 2.5, 5]
+    elif max_abs_val <= 10:
+        ticks = [-10, -5, 0, 5, 10]
+    elif max_abs_val <= 15:
+        ticks = [-15, -10, -5, 0, 5, 10, 15]
+    elif max_abs_val <= 25:
+        ticks = [-25, -15, -5, 0, 5, 15, 25]
+    elif max_abs_val <= 50:
+        ticks = [-50, -25, 0, 25, 50]
+    else:
+        ticks = [-100, -50, 0, 50, 100]
+
+    cbar.set_ticks(ticks)
+
+    # Make sure the figure draws before adding more elements
+    plt.draw()
 
     # Add title
     ax_pct.set_title(f"{plot_title}\nPercentage Improvement at each station", fontsize=14)
@@ -439,7 +461,8 @@ def analyze_and_map_comparison(file1, file2, column_name='correlation', higher_i
     return stats
 
 
-def run_batch_analysis(base_dir, scenarios, statistics, model1_label='LSDM', model2_label='Lisflood', output_dir=None):
+def run_batch_analysis(base_dir, scenarios, statistics, model1_label='LSDM', model2_label='Lisflood', output_dir=None,
+                       window='_30d_400d'):
     """
     Run analysis for multiple scenarios and statistics, saving results to a CSV.
 
@@ -464,8 +487,8 @@ def run_batch_analysis(base_dir, scenarios, statistics, model1_label='LSDM', mod
         for statistic in statistics:
             print(f"\nAnalyzing {scenario} - {statistic}")
 
-            file1 = f"ITRF2020-IGS-RES_{statistic}_data_{scenario}_VS_M.csv"
-            file2 = f"ITRF2020-IGS-RES_{statistic}_data_{scenario}_VS_L.csv"
+            file1 = f"ITRF2020-IGS-RES_{statistic}_data_{scenario}_VS_M_BP{window}.csv"
+            file2 = f"ITRF2020-IGS-RES_{statistic}_data_{scenario}_VS_L_BP{window}.csv"
 
             filepath1 = os.path.join(base_dir, file1)
             filepath2 = os.path.join(base_dir, file2)
@@ -533,10 +556,7 @@ def main():
 if __name__ == "__main__":
     # Example direct execution
     inp_dir = r'OUTPUT\SNX_LOAD_COMPARISONS\ITRF2020-IGS-RES_01D\MAPS\WITH_BP'
-    scenarios = ['WO-A']#, 'WO-AOS', 'WO-None']
-    statistics = ['std_reduction', 'variance_explained', 'correlation', 'kge2012']
-
-    run_batch_analysis(inp_dir, scenarios, statistics, 'LSDM', 'Lisflood', output_dir=inp_dir)
-
-    # Uncomment to use command line arguments instead
-    # main()
+    scenarios = ['WO-A']
+    statistics = ['kge2012', 'kge_gamma', 'std_reduction', 'variance_explained', 'correlation']
+    window = '_30d_400d'
+    run_batch_analysis(inp_dir, scenarios, statistics, 'LSDM', 'Lisflood', output_dir=inp_dir, window=window)

@@ -1182,22 +1182,22 @@ def main():
     sampling = '01D'
     solution = 'ITRF2020-IGS-RES'
     # solution = 'IGS1R03SNX'
-    stations = ['ZIMM']  # Leave empty list to process all available stations
+    stations = []  # Leave empty list to process all available stations
 
     # Define bandpass filter parameters
     # Set apply_filter to False to disable filtering entirely
     filter_params = {
         'apply_filter': True,
-        'lowcut': 1.0 / (400 * 24 * 60 * 60),  # Lower frequency (longer period): 400 days
-        'highcut': 1.0 / (30 * 24 * 60 * 60),  # Higher frequency (shorter period): 30 days
+        'lowcut': 1.0 / (10000 * 24 * 60 * 60),  # Lower frequency (longer period): 400 days
+        'highcut': 1.0 / (400 * 24 * 60 * 60),  # Higher frequency (shorter period): 30 days
         'order': 2  # Filter order (lower is more stable but less sharp cutoff)
     }
 
     # Select which components to remove from the original data (set value to True to remove)
     reduce_components = {
-        'A': False,  # Atmospheric loading
-        'O': False,  # Ocean loading
-        'S': False,  # Surface water loading
+        'A': 1,  # Atmospheric loading
+        'O': 0,  # Ocean loading
+        'S': 0,  # Surface water loading
         'H': False  # Hydrological loading
     }
 
@@ -1207,8 +1207,8 @@ def main():
         'O': False,  # Ocean loading
         'S': False,  # Surface water loading
         'H': False,  # Hydrological loading (old LSDM)
-        'L': False,  # Hydrological loading (Lisflood)
-        'M': True,  # Hydrological loading (LSDM)
+        'L': 1,  # Hydrological loading (Lisflood)
+        'M': 0,  # Hydrological loading (LSDM)
     }
 
     # Date range for analysis

@@ -148,6 +148,7 @@ def extract_statistics_for_mapping(compiled_data, min_num_points=30, min_h_std=0
                 'variance_explained': stats['variance_explained'],
                 'correlation': stats['correlation'],
                 'kge2012': stats['kge_modified'],
+                'kge_gamma': stats['kge_components']['alpha'],
                 'rms': stats['rms'],
                 'mean_diff': stats['mean'],
                 'median_diff': stats['median'],
@@ -392,7 +393,7 @@ def visualize_variance_explained_map(comp_dir, output_dir=None, pattern='*_WO-*_
 
 def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_percent=10,
                                  figsize=(6, 8), output_dir=None, solution=None, sum_components=None,
-                                 compare_with=None, filter_info=None, dpi=300):
+                                 compare_with=None, filter_info=None, dpi=300, top=True):
     if plot_df is None or len(plot_df) == 0:
         print("No data available for bar plot")
         return None
@@ -402,8 +403,12 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
         return None
 
     num_stations = max(1, int(len(plot_df) * top_percent / 100))
-    top_stations = plot_df.nlargest(num_stations, metric)
-    top_stations = top_stations.sort_values(by=metric)
+    if top:
+        top_stations = plot_df.nlargest(num_stations, metric)
+        top_stations = top_stations.sort_values(by=metric)
+    else:
+        top_stations = plot_df.nsmallest(num_stations, metric)
+        top_stations = top_stations.sort_values(by=metric, ascending=False)
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -437,6 +442,11 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
 
     ax.set_title(title)
 
+    if top:
+        ax.set_xlim(0,1)
+    else:
+        ax.set_xlim(-0.2,0.4)
+
     plt.tight_layout()
 
     if output_dir and solution and compare_with:
@@ -453,8 +463,13 @@ def create_top_stations_bar_plot(plot_df, metric='variance_explained', top_perce
                 filter_str = "_BP"
 
         metric_str = '_'.join(metric.split('_'))
-        output_file = os.path.join(output_dir,
-                                   f'{solution}_top_{top_percent}percent_{metric_str}_WO-{sum_components}_VS_{compare_with}{filter_str}.png')
+        if top:
+            output_file = os.path.join(output_dir,
+                                       f'{solution}_top_{top_percent}percent_{metric_str}_WO-{sum_components}_VS_{compare_with}{filter_str}.png')
+        else:
+            output_file = os.path.join(output_dir,
+                                       f'{solution}_bottom_{top_percent}percent_{metric_str}_WO-{sum_components}_VS_{compare_with}{filter_str}.png')
+
         plt.savefig(output_file, dpi=dpi, bbox_inches='tight')
         print(f"Bar plot saved to {output_file}")
 
@@ -834,77 +849,86 @@ if __name__ == "__main__":
     solution = 'ITRF2020-IGS-RES'
     # solution = 'IGS1R03SNX'
     sampling = '01D'
-    reduction = 'None'  # 'A', 'AOS', 'None'
-    vs = 'M'  # Component to compare with
 
-    # Base directory
-    comp_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL'
+    for reduction in ['A']:
+        for vs in ['M','L']:  # Component to compare with
 
-    # Define filter criteria parameters
-    filter_period = "30d_400d"  # Set to None for no bandpass filter
+            # Base directory
+            comp_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL'
 
-    # Create pattern for file matching
-    if filter_period:
-        pattern = f'*_WO-{reduction}_VS_SUM-{vs}_BP_{filter_period}.PKL'
-        output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'WITH_BP')
-    else:
-        pattern = f'*_WO-{reduction}_VS_SUM-{vs}.PKL'
-        output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'NO_BP')
+            # Define filter criteria parameters
+            filter_period = "30d_400d"  # Set to None for no bandpass filter
 
-    # Station filtering criteria
-    min_num_points = 1000
-    min_h_std = 2.0  # 1.5 mm minimum standard deviation for H component
+            # Create pattern for file matching
+            if filter_period:
+                pattern = f'*_WO-{reduction}_VS_SUM-{vs}_BP_{filter_period}.PKL'
+                output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'WITH_BP')
+            else:
+                pattern = f'*_WO-{reduction}_VS_SUM-{vs}.PKL'
+                output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'NO_BP')
 
-    print(f"Using parameters: min_num_points={min_num_points}, min_h_std={min_h_std}")
-    print(f"Pattern: {pattern}")
-    print(f"Output directory: {output_dir}")
+            # Station filtering criteria
+            min_num_points = 1000
+            min_h_std = 1.5  # 1.5 mm minimum standard deviation for H component
 
-    # First, load data to get filter info
-    compiled_data, sum_components, compare_with, solution, filter_info = load_station_results(comp_dir, pattern)
-    if filter_info:
-        print("Filter info detected:")
-        for key, value in filter_info.items():
-            print(f"  {key}: {value}")
+            print(f"Using parameters: min_num_points={min_num_points}, min_h_std={min_h_std}")
+            print(f"Pattern: {pattern}")
+            print(f"Output directory: {output_dir}")
 
-    # Create the variance explained map
-    print("\nCreating variance explained map...")
-    fig1, plot_df1 = visualize_variance_explained_map(comp_dir, output_dir, pattern, min_num_points, min_h_std,
-                                                      cmap='Greens')
+            # First, load data to get filter info
+            compiled_data, sum_components, compare_with, solution, filter_info = load_station_results(comp_dir, pattern)
+            if filter_info:
+                print("Filter info detected:")
+                for key, value in filter_info.items():
+                    print(f"  {key}: {value}")
 
-    # Create the variance ratio map
-    print("\nCreating variance ratio map...")
-    fig2, plot_df2 = create_variance_ratio_map(comp_dir, output_dir, pattern, min_num_points, min_h_std)
+            # Create the variance explained map
+            print("\nCreating variance explained map...")
+            fig1, plot_df1 = visualize_variance_explained_map(comp_dir, output_dir, pattern, min_num_points, min_h_std,
+                                                              cmap='Greens')
 
-    # Create the correlation map
-    print("\nCreating correlation map...")
-    fig3, plot_df3 = create_correlation_map(comp_dir, 'correlation', output_dir, pattern, min_num_points, min_h_std,
-                                            cmap='coolwarm')
+            # Create the variance ratio map
+            print("\nCreating variance ratio map...")
+            fig2, plot_df2 = create_variance_ratio_map(comp_dir, output_dir, pattern, min_num_points, min_h_std)
 
-    # Create KGE map
-    print("\nCreating KGE map...")
-    fig3a, plot_df3a = create_correlation_map(comp_dir, 'kge2012', output_dir, pattern, min_num_points, min_h_std,
-                                              cmap='coolwarm')
+            # Create the correlation map
+            print("\nCreating correlation map...")
+            fig3, plot_df3 = create_correlation_map(comp_dir, 'correlation', output_dir, pattern, min_num_points, min_h_std,
+                                                    cmap='coolwarm')
 
-    # Create standard deviation reduction map
-    print("\nCreating standard deviation reduction map...")
-    fig3b, plot_df3b = create_correlation_map(comp_dir, 'std_reduction', output_dir, pattern, min_num_points, min_h_std,
-                                              cmap='coolwarm')
+            # Create KGE map
+            print("\nCreating KGE map...")
+            fig3a, plot_df3a = create_correlation_map(comp_dir, 'kge2012', output_dir, pattern, min_num_points, min_h_std,
+                                                      cmap='coolwarm')
 
-    # Create bar plot for top stations with highest variance explained
-    print("\nCreating top stations by variance explained bar plot...")
-    fig4 = create_top_stations_bar_plot(plot_df1, metric='variance_explained', top_percent=5,
-                                        output_dir=output_dir, solution=solution,
-                                        sum_components=sum_components, compare_with=compare_with,
-                                        filter_info=filter_info)
+            fig3c, plot_df3c = create_correlation_map(comp_dir, 'kge_gamma', output_dir, pattern, min_num_points, min_h_std,
+                                                      cmap='coolwarm')
 
-    # Create bar plot for top stations with highest correlation
-    print("\nCreating top stations by correlation bar plot...")
-    fig5 = create_top_stations_bar_plot(plot_df3, metric='correlation', top_percent=5,
-                                        output_dir=output_dir, solution=solution,
-                                        sum_components=sum_components, compare_with=compare_with,
-                                        filter_info=filter_info)
+            # Create standard deviation reduction map
+            print("\nCreating standard deviation reduction map...")
+            fig3b, plot_df3b = create_correlation_map(comp_dir, 'std_reduction', output_dir, pattern, min_num_points, min_h_std,
+                                                      cmap='coolwarm')
 
-    print("\nAll visualizations completed successfully!")
-    # Close all figures to free memory
-    plt.close('all')
+            # Create bar plot for top stations with highest variance explained
+            print("\nCreating top stations by variance explained bar plot...")
+            fig4 = create_top_stations_bar_plot(plot_df1, metric='variance_explained', top_percent=5,
+                                                output_dir=output_dir, solution=solution,
+                                                sum_components=sum_components, compare_with=compare_with,
+                                                filter_info=filter_info)
+
+            # Create bar plot for top stations with highest correlation
+            print("\nCreating top stations by correlation bar plot...")
+            fig5 = create_top_stations_bar_plot(plot_df3a, metric='kge2012', top_percent=5,
+                                                output_dir=output_dir, solution=solution,
+                                                sum_components=sum_components, compare_with=compare_with,
+                                                filter_info=filter_info)
+
+            fig6 = create_top_stations_bar_plot(plot_df3a, metric='kge2012', top_percent=5,
+                                                output_dir=output_dir, solution=solution,
+                                                sum_components=sum_components, compare_with=compare_with,
+                                                filter_info=filter_info, top=False)
+
+            print("\nAll visualizations completed successfully!")
+            # Close all figures to free memory
+            plt.close('all')
 

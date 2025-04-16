@@ -42,7 +42,7 @@ def create_boxplot_comparison(file_pattern, inp_dir, column_name, output_filenam
             # Remove common prefix and suffix to get a cleaner label
             label = file_name.split('.')[-2]
             label = label.split('_')
-            label = "_".join(label[-3:])
+            label = "_".join(label[-6:-3])
 
             # Read the CSV file
             df = pd.read_csv(file_path)
@@ -129,10 +129,11 @@ if __name__ == "__main__":
     solution = 'ITRF2020-IGS-RES'
     sampling = '01D'
     inp_dir = rf'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/MAPS/WITH_BP/'
+    bp_window = '30d_400d'
 
     for column_name in ['std_reduction', 'variance_explained', 'correlation','kge2012']:
         # column_name = "std_reduction"
-        file_pattern = f"{solution}_{column_name}_data_*.csv"
+        file_pattern = f"{solution}_{column_name}_data_*{bp_window}.csv"
         output_filename = f"{column_name}_boxplot.png"
 
         # Create the boxplot

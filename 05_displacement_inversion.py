@@ -545,12 +545,12 @@ def main():
                         help='Path to station coordinates file')
     parser.add_argument('--love', type=str, default=r'EXT/LLNs/ak135-LLNs-complete.dat',
                         help='Path to Love numbers file')
-    parser.add_argument('--max-degree', type=int, default=7,
+    parser.add_argument('--max-degree', type=int, default=9,
                         help='Maximum spherical harmonic degree')
     parser.add_argument('--frame', type=str, default='CF',
                         help='Displacement frame')
-    parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD)', default='20180102')
-    parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD)', default='20180102')
+    parser.add_argument('--start-date', type=str, help='Start date (YYYY-MM-DD)', default='20150101')
+    parser.add_argument('--end-date', type=str, help='End date (YYYY-MM-DD)', default='20200101')
     parser.add_argument('--limit_stations', action='store_true', default=False,
                         help='Use only datum stations')
     parser.add_argument('--only_datum', action='store_true', default=False,
@@ -559,17 +559,17 @@ def main():
                         help='Use VCE for adding error information') ## Doesnt work
     parser.add_argument('--errors', action='store_true', default=True,
                         help='Calculate formal errors')
-    parser.add_argument('--printmaps', action='store_true', default=True,
+    parser.add_argument('--printmaps', action='store_true', default=False,
                         help='Print Maps')
-    parser.add_argument('--regularization', action='store_true', default=False,
+    parser.add_argument('--regularization', action='store_true', default=True,
                         help='Use regularization')
 
     # Add arguments for component reduction
-    parser.add_argument('--reduce_A', action='store_true', default=0,
+    parser.add_argument('--reduce_A', action='store_true', default=1,
                         help='Reduce atmospheric loading component')
-    parser.add_argument('--reduce_O', action='store_true', default=0,
+    parser.add_argument('--reduce_O', action='store_true', default=1,
                         help='Reduce ocean loading component')
-    parser.add_argument('--reduce_S', action='store_true', default=0,
+    parser.add_argument('--reduce_S', action='store_true', default=1,
                         help='Reduce surface water loading component')
     parser.add_argument('--reduce_H', action='store_true', default=0,
                         help='Reduce hydrological loading component')

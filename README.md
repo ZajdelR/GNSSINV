@@ -17,7 +17,7 @@ This repository contains a collection of Python scripts for analyzing global geo
    cd GNSSINV
    ```
 
-2. **Install dependencies using Poetry:**
+2.a **Install dependencies using Poetry:**
    ```bash
    # Install dependencies
    poetry install
@@ -25,6 +25,17 @@ This repository contains a collection of Python scripts for analyzing global geo
    # Activate the Poetry environment
    poetry shell
    ```
+2.b **Install dependencies using simple pip install:**
+    ```bash
+    # Create a virtual environment
+    python3 -m venv venv
+
+    # Activate venv
+    source venv/bin/activate
+
+    # Install dependencies
+    pip install -r requirements.txt
+    ```
 
 3. **Verifying installation:**
    After activating the Poetry environment, you can verify that everything is working correctly by running:

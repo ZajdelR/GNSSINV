@@ -50,7 +50,7 @@ def create_coefficient_time_series(base_dir='', solution='IGS1R03SNX_LOAD_CRD_CF
     """
 
     # Create full directory path
-    solution_dir = os.path.join(base_dir, solution)
+    solution_dir = os.path.join(base_dir, solution, 'TIME')
 
     # Find all date directories
     date_dirs = sorted(glob.glob(os.path.join(solution_dir, '[0-9]' * 8)))
