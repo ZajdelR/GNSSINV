@@ -1372,7 +1372,7 @@ def main():
     # Example of a low-pass filter configuration
     filter_params = {
         'apply_filter': True,
-        'lowcut': None,#1.0 / (30 * 24 * 60 * 60),  # Set to None for low-pass filter
+        'lowcut': 1.0 / (30 * 24 * 60 * 60),  # Set to None for low-pass filter
         'highcut': 1.0 / (400 * 24 * 60 * 60),  # Higher frequency (shorter period): 400 days
         'order': 3 # Filter order (lower is more stable but less sharp cutoff)
     }
