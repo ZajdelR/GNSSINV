@@ -108,11 +108,6 @@ def reverse_cf_cm(df):
     df.loc[:,['X','Y','Z']] *= -1
     return df
 
-
-import numpy as np
-from scipy.signal import butter, sosfiltfilt
-from scipy.fft import fft, ifft, fftfreq
-
 def fft_notch_filter(signal, target_freq, sampling_rate, width=0.1):
     n = len(signal)
     freqs = fftfreq(n, d=1 / sampling_rate)
@@ -128,15 +123,16 @@ def fft_notch_filter(signal, target_freq, sampling_rate, width=0.1):
 
 def apply_bandpass_filter(signal, lowcut, highcut, sampling_rate, order=4, notch_width=0.1):
     """
-    Apply Butterworth filter to the signal. Adds FFT-notch to low-pass to remove annual signal.
+    Apply a Butterworth filter (band-pass, high-pass, or low-pass) to time-series data.
+    For low-pass, additionally apply FFT-notch to remove annual frequency.
 
     Parameters:
-        signal (array-like): Time-series data.
+        signal (array-like): The time-series data to filter.
         lowcut (float or None): Low cutoff frequency (Hz).
         highcut (float or None): High cutoff frequency (Hz).
         sampling_rate (float): Sampling rate in Hz.
         order (int): Butterworth filter order.
-        notch_width (float): Fractional width of FFT notch (low-pass only).
+        notch_width (float): Width of FFT notch (relative to annual frequency).
 
     Returns:
         array-like: Filtered signal.
@@ -155,29 +151,26 @@ def apply_bandpass_filter(signal, lowcut, highcut, sampling_rate, order=4, notch
     nyquist = 0.5 * sampling_rate
 
     if lowcut is not None and highcut is not None:
-        # Band-pass Butterworth
+        # Band-pass Butterworth with filtfilt
         low = max(0.0001, min(lowcut / nyquist, 0.9999))
         high = max(low + 0.0001, min(highcut / nyquist, 0.9999))
-        sos = butter(order, [low, high], btype='band', analog=False, output='sos')
-        filtered_signal = sosfiltfilt(sos, signal_copy)
+        b, a = butter(order, [low, high], btype='band', analog=False)
+        filtered_signal = filtfilt(b, a, signal_copy)
 
     elif lowcut is not None and highcut is None:
-        # High-pass Butterworth
+        # High-pass Butterworth with filtfilt
         low = max(0.0001, min(lowcut / nyquist, 0.9999))
-        sos = butter(order, low, btype='high', analog=False, output='sos')
-        filtered_signal = sosfiltfilt(sos, signal_copy)
+        b, a = butter(order, low, btype='high', analog=False)
+        filtered_signal = filtfilt(b, a, signal_copy)
 
     elif lowcut is None and highcut is not None:
-        # Low-pass Butterworth + FFT-notch
+        # Low-pass Butterworth with filtfilt + FFT notch to remove annual cycle
         high = max(0.0001, min(highcut / nyquist, 0.9999))
-        sos = butter(order, high, btype='low', analog=False, output='sos')
-        lowpassed = sosfiltfilt(sos, signal_copy)
+        b, a = butter(order, high, btype='low', analog=False)
+        lowpassed = filtfilt(b, a, signal_copy)
 
-        # Uncomment if you want to force diminish annual signal
-        # annual_freq = 1 / (365.25 * 24 * 60 * 60)  # Annual in Hz
-        # filtered_signal = fft_notch_filter(lowpassed, annual_freq, sampling_rate, width=notch_width)
-
-        filtered_signal = lowpassed
+        annual_freq = 1 / (365.25 * 24 * 60 * 60)  # Annual signal frequency in Hz
+        filtered_signal = fft_notch_filter(lowpassed, annual_freq, sampling_rate, width=notch_width)
 
     else:
         return signal  # No filtering

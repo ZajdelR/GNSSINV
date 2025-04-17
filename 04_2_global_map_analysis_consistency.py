@@ -958,26 +958,27 @@ def create_correlation_map(comp_dir, value_to_plot, output_dir=None, pattern='*_
 
     return fig, plot_df
 
-# Example usage
-# Example usage with updated pattern matching
 if __name__ == "__main__":
     # Define parameters
     solution = 'ITRF2020-IGS-RES'
     # solution = 'IGS1R03SNX'
     sampling = '01D'
 
+    filter_patterns = [
+        # None,  # No filter
+        # "BP_30d_400d",  # Band-pass filter
+        "LP_400d",  # Low-pass filter
+        "HP_30d"  # High-pass filter
+    ]
+
+    # Station filtering criteria
+    min_num_points = 1000
+    min_h_std = 1.5
+
+    comp_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL'
+
     for reduction in ['A']:
         for vs in ['L']:  # Component to compare with
-
-            # Base directory
-            comp_dir = f'OUTPUT/SNX_LOAD_COMPARISONS/{solution}_{sampling}/PKL'
-
-            filter_patterns = [
-                #None,  # No filter
-                "BP_30d_400d",  # Band-pass filter
-                #"LP_400d",  # Low-pass filter
-                #"HP_30d"  # High-pass filter
-            ]
 
             for filter_pattern in filter_patterns:
                 # Create pattern for file matching
@@ -993,10 +994,6 @@ if __name__ == "__main__":
                 elif filter_pattern.startswith("HP_"):
                     pattern = f'*_WO-{reduction}_VS_SUM-{vs}_{filter_pattern}.PKL'
                     output_dir = os.path.join(os.path.dirname(comp_dir), "MAPS", 'HIGHPASS')
-
-                # Station filtering criteria
-                min_num_points = 1000
-                min_h_std = 0.5  # 1.5 mm minimum standard deviation for H component
 
                 print(f"\n===== Processing: {filter_pattern if filter_pattern else 'NO FILTER'} =====")
                 print(f"Using parameters: min_num_points={min_num_points}, min_h_std={min_h_std}")

@@ -1369,13 +1369,27 @@ def main():
     stations = ['GOPE']  # Leave empty list to process all available stations
 
     # Define filter parameters
-    # Example of a low-pass filter configuration
+    # Example of a bandpass configuration
     filter_params = {
         'apply_filter': True,
-        'lowcut': 1.0 / (30 * 24 * 60 * 60),  # Set to None for low-pass filter
-        'highcut': 1.0 / (400 * 24 * 60 * 60),  # Higher frequency (shorter period): 400 days
-        'order': 3 # Filter order (lower is more stable but less sharp cutoff)
+        'lowcut': 1.0 / (400 * 24 * 60 * 60),
+        'highcut': 1.0 / (30 * 24 * 60 * 60),
+        'order': 3
     }
+
+    # Example of a low-pass configuration
+    # filter_params = {
+    #     'apply_filter': True,
+    #     'highcut': 1.0 / (400 * 24 * 60 * 60),
+    #     'order': 3
+    # }
+
+    # Example of a high-pass configuration
+    # filter_params = {
+    #     'apply_filter': True,
+    #     'lowcut': 1.0 / (30 * 24 * 60 * 60),
+    #     'order': 3
+    # }
 
     # Select which components to remove from the original data (set value to True to remove)
     reduce_components = {
