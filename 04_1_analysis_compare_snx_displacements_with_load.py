@@ -210,15 +210,21 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
             # Check if column exists
             if column in df.columns:
                 try:
-                    filtered_df[column] = apply_bandpass_filter(
+                    original_std = df[column].std()
+                    filtered_series = apply_bandpass_filter(
                         df[column].values,
                         lowcut,
                         highcut,
                         sampling_rate,
                         order=filter_order
                     )
+                    filtered_std = np.std(filtered_series)
+                    std_reduction_pct = ((original_std - filtered_std) / original_std) * 100
+                    filtered_df[column] = filtered_series
                     with print_lock:
                         print(f"Successfully filtered {column}")
+                        print(f"Standard deviation reduced from {original_std:.6f} to {filtered_std:.6f} for {column}")
+                        print(f"Noise reduction: {std_reduction_pct:.2f}% for {column}")
                 except Exception as e:
                     with print_lock:
                         print(f"Error filtering {column}: {e}")
@@ -227,9 +233,6 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
             else:
                 with print_lock:
                     print(f"Column {column} not found in DataFrame")
-
-        # Update the original dataframe with filtered values
-        df.loc[:, ['dN', 'dE', 'dU']] = filtered_df.loc[:, ['dN', 'dE', 'dU']]
 
     # STEP 1: Handle the components to reduce from the original data
     df_red, reduce_components_name = reduce_components_from_data(
@@ -286,7 +289,11 @@ def process_station(sta, sampling, solution, reduce_components, compare_componen
     differences_dU = stats['differences']
 
     # Calculate standard deviations for original data and individual components
-    std_original_df = df.loc[common_dates]['dU'].std()
+    if sampling == '07D':
+        std_original_df = aggregate_gps_data(df).loc[common_dates]['dU'].std()
+    else:
+        std_original_df = df.loc[common_dates]['dU'].std()
+
     std_comparison = comp_common['dU'].std()
     reduction_percent = (1 - stats['rms'] / std_original_df) * 100
 
@@ -394,7 +401,6 @@ def reduce_components_from_data(sta, df, reduce_components, sampling, apply_filt
     # Define all possible components
     components = ['A', 'O', 'S', 'H']
 
-    # Always use the CODE folder for component data (not CODE_BP)
     # Loop through each component
     for component in components:
         # Only process if this component is enabled in reduce_components
@@ -419,6 +425,7 @@ def reduce_components_from_data(sta, df, reduce_components, sampling, apply_filt
 
         # Convert index to date for consistency
         sum_df.index = sum_df.index.date
+        sum_df2 = sum_df.copy()
 
         # Apply filter to component data if requested
         if apply_filter and filter_params:
@@ -455,21 +462,32 @@ def reduce_components_from_data(sta, df, reduce_components, sampling, apply_filt
                 for column in ['dN', 'dE', 'dU']:
                     if column in sum_df.columns:
                         try:
-                            sum_df[column] = apply_bandpass_filter(
+                            original_std = sum_df[column].std()
+                            filtered_series = apply_bandpass_filter(
                                 sum_df[column].values,
                                 lowcut,
                                 highcut,
                                 sampling_rate,
                                 order=filter_order
                             )
+                            filtered_std = np.std(filtered_series)
+                            std_reduction_pct = ((original_std - filtered_std) / original_std) * 100
+                            sum_df[column] = filtered_series
                             with print_lock:
                                 print(f"Successfully filtered {column} for reduction components")
+                                print(f"Standard deviation reduced from {original_std:.6f} to {filtered_std:.6f} for {column}")
+                                print(f"Noise reduction: {std_reduction_pct:.2f}% for {column}")
                         except Exception as e:
                             with print_lock:
                                 print(f"Error filtering {column} for reduction components: {e}")
                     else:
                         with print_lock:
                             print(f"Column {column} not found in reduction components DataFrame")
+
+        f,a = plt.subplots()
+        sum_df2['dU'].plot(ax=a)
+        sum_df['dU'].plot(ax=a)
+        f.savefig('test.png')
 
         if sampling == '07D':
             sum_df[['gpsweek', 'doy']] = pd.DataFrame(
@@ -498,6 +516,126 @@ def reduce_components_from_data(sta, df, reduce_components, sampling, apply_filt
 
     return df_red, components_name
 
+# def create_comparison_data(sta, compare_components, sampling, apply_filter=False, filter_params=None):
+#     """
+#     Create a comparison dataset by summing selected components.
+#
+#     Parameters:
+#     -----------
+#     sta : str
+#         Station name
+#     compare_components : dict
+#         Dictionary indicating which components to include in the sum
+#     sampling : str
+#         Sampling rate
+#     apply_filter : bool
+#         Whether to apply filter to the components
+#     filter_params : dict
+#         Dictionary containing filter parameters (lowcut, highcut, order)
+#
+#     Returns:
+#     --------
+#     tuple
+#         (comp_df, components_name) where comp_df is the summed DataFrame
+#         and components_name is a string representation of the included components
+#     """
+#     # Create list of components to include in sum
+#     component_labels = []
+#     files = []
+#
+#     # Define all possible components
+#     components = ['A', 'O', 'S', 'H', 'M', 'L']
+#     # Always use the CODE folder for component data (not CODE_BP)
+#     # Loop through each component
+#     for component in components:
+#         # Only process if this component is enabled in compare_components
+#         if compare_components.get(component, False):
+#             file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_{component}_cf.pkl'
+#             if os.path.exists(file_path):
+#                 files.append(file_path)
+#                 component_labels.append(component)
+#             else:
+#                 with print_lock:
+#                     print(f"Warning: Component file not found: {file_path}")
+#
+#     # Load and combine selected components
+#     if files:
+#         with file_lock:
+#             files_df = {os.path.basename(x): pd.read_pickle(x) for x in files}
+#         sum_df, name = combine_selected_files(files_df)
+#         sum_df = sum_df.rename({'R': 'dU', 'NS': 'dN', 'EW': 'dE'}, axis=1)
+#
+#         # Convert index to date for consistency
+#         sum_df.index = sum_df.index.date
+#
+#         # Apply filter to component data if requested
+#         if apply_filter and filter_params:
+#             # Extract filter parameters
+#             lowcut = filter_params.get('lowcut', None)
+#             highcut = filter_params.get('highcut', None)
+#             filter_order = filter_params.get('order', 2)
+#
+#             # Only apply filter if at least one cutoff frequency is specified
+#             if lowcut is not None or highcut is not None:
+#                 # Determine filter type for display purposes
+#                 if lowcut is not None and highcut is not None:
+#                     filter_type = "band-pass"
+#                     filter_desc = f"({1 / highcut / 86400:.1f}d - {1 / lowcut / 86400:.1f}d)"
+#                 elif lowcut is not None and highcut is None:
+#                     filter_type = "high-pass"
+#                     filter_desc = f"(>{1 / lowcut / 86400:.1f}d)"
+#                 elif lowcut is None and highcut is not None:
+#                     filter_type = "low-pass"
+#                     filter_desc = f"(<{1 / highcut / 86400:.1f}d)"
+#
+#                 with print_lock:
+#                     print(f"Applying {filter_type} filter {filter_desc} to comparison components: {component_labels}")
+#                     # Calculate sampling rate
+#                     try:
+#                         sampling_days = int(sampling.strip('D'))
+#                         sampling_rate = 1 / (sampling_days * 24 * 60 * 60)  # Convert to Hz
+#                     except (ValueError, AttributeError):
+#                         sampling_days = 1
+#                         sampling_rate = 1 / (24 * 60 * 60)  # Default to daily sampling (Hz)
+#
+#                     # Apply the filter to each column
+#                     for column in ['dN', 'dE', 'dU']:
+#                         if column in sum_df.columns:
+#                             try:
+#                                 sum_df[column] = apply_bandpass_filter(
+#                                     sum_df[column].values,
+#                                     lowcut,
+#                                     highcut,
+#                                     sampling_rate,
+#                                     order=filter_order
+#                                 )
+#                                 with print_lock:
+#                                     print(f"Successfully filtered {column} for comparison components")
+#                             except Exception as e:
+#                                 with print_lock:
+#                                     print(f"Error filtering {column} for comparison components: {e}")
+#                         else:
+#                             with print_lock:
+#                                 print(f"Column {column} not found in comparison components DataFrame")
+#
+#                 if sampling == '07D':
+#                     sum_df[['gpsweek', 'doy']] = pd.DataFrame(
+#                         sum_df.index.map(
+#                             lambda x: dt2gpstime(datetime.datetime.combine(x, datetime.time()))
+#                         ).tolist(),
+#                         index=sum_df.index
+#                     )
+#                     sum_df = aggregate_gps_data(sum_df)
+#
+#                 components_name = ''.join(component_labels)
+#                 return sum_df, components_name
+#             else:
+#                 # If no components selected, return None
+#                 with print_lock:
+#                     print(f"Warning: No components selected for comparison for station {sta}")
+#                 return None, "None"
+
+
 def create_comparison_data(sta, compare_components, sampling, apply_filter=False, filter_params=None):
     """
     Create a comparison dataset by summing selected components.
@@ -527,126 +665,6 @@ def create_comparison_data(sta, compare_components, sampling, apply_filter=False
 
     # Define all possible components
     components = ['A', 'O', 'S', 'H', 'M', 'L']
-    # Always use the CODE folder for component data (not CODE_BP)
-    # Loop through each component
-    for component in components:
-        # Only process if this component is enabled in compare_components
-        if compare_components.get(component, False):
-            file_path = f'EXT/ESMGFZLOADING/CODE/{sta}_{component}_cf.pkl'
-            if os.path.exists(file_path):
-                files.append(file_path)
-                component_labels.append(component)
-            else:
-                with print_lock:
-                    print(f"Warning: Component file not found: {file_path}")
-
-    # Load and combine selected components
-    if files:
-        with file_lock:
-            files_df = {os.path.basename(x): pd.read_pickle(x) for x in files}
-        sum_df, name = combine_selected_files(files_df)
-        sum_df = sum_df.rename({'R': 'dU', 'NS': 'dN', 'EW': 'dE'}, axis=1)
-
-        # Convert index to date for consistency
-        sum_df.index = sum_df.index.date
-
-        # Apply filter to component data if requested
-        if apply_filter and filter_params:
-            # Extract filter parameters
-            lowcut = filter_params.get('lowcut', None)
-            highcut = filter_params.get('highcut', None)
-            filter_order = filter_params.get('order', 2)
-
-            # Only apply filter if at least one cutoff frequency is specified
-            if lowcut is not None or highcut is not None:
-                # Determine filter type for display purposes
-                if lowcut is not None and highcut is not None:
-                    filter_type = "band-pass"
-                    filter_desc = f"({1 / highcut / 86400:.1f}d - {1 / lowcut / 86400:.1f}d)"
-                elif lowcut is not None and highcut is None:
-                    filter_type = "high-pass"
-                    filter_desc = f"(>{1 / lowcut / 86400:.1f}d)"
-                elif lowcut is None and highcut is not None:
-                    filter_type = "low-pass"
-                    filter_desc = f"(<{1 / highcut / 86400:.1f}d)"
-
-                with print_lock:
-                    print(f"Applying {filter_type} filter {filter_desc} to comparison components: {component_labels}")
-                    # Calculate sampling rate
-                    try:
-                        sampling_days = int(sampling.strip('D'))
-                        sampling_rate = 1 / (sampling_days * 24 * 60 * 60)  # Convert to Hz
-                    except (ValueError, AttributeError):
-                        sampling_days = 1
-                        sampling_rate = 1 / (24 * 60 * 60)  # Default to daily sampling (Hz)
-
-                    # Apply the filter to each column
-                    for column in ['dN', 'dE', 'dU']:
-                        if column in sum_df.columns:
-                            try:
-                                sum_df[column] = apply_bandpass_filter(
-                                    sum_df[column].values,
-                                    lowcut,
-                                    highcut,
-                                    sampling_rate,
-                                    order=filter_order
-                                )
-                                with print_lock:
-                                    print(f"Successfully filtered {column} for comparison components")
-                            except Exception as e:
-                                with print_lock:
-                                    print(f"Error filtering {column} for comparison components: {e}")
-                        else:
-                            with print_lock:
-                                print(f"Column {column} not found in comparison components DataFrame")
-
-                if sampling == '07D':
-                    sum_df[['gpsweek', 'doy']] = pd.DataFrame(
-                        sum_df.index.map(
-                            lambda x: dt2gpstime(datetime.datetime.combine(x, datetime.time()))
-                        ).tolist(),
-                        index=sum_df.index
-                    )
-                    sum_df = aggregate_gps_data(sum_df)
-
-                components_name = ''.join(component_labels)
-                return sum_df, components_name
-            else:
-                # If no components selected, return None
-                with print_lock:
-                    print(f"Warning: No components selected for comparison for station {sta}")
-                return None, "None"
-
-
-def create_comparison_data(sta, compare_components, sampling, apply_filter=False, filter_params=None):
-    """
-    Create a comparison dataset by summing selected components.
-
-    Parameters:
-    -----------
-    sta : str
-        Station name
-    compare_components : dict
-        Dictionary indicating which components to include in the sum
-    sampling : str
-        Sampling rate
-    apply_filter : bool
-        Whether to apply filter to the components
-    filter_params : dict
-        Dictionary containing filter parameters (lowcut, highcut, order)
-
-    Returns:
-    --------
-    tuple
-        (comp_df, components_name) where comp_df is the summed DataFrame
-        and components_name is a string representation of the included components
-    """
-    # Create list of components to include in sum
-    component_labels = []
-    files = []
-
-    # Define all possible components
-    components = ['A', 'O', 'S', 'H', 'M', 'L']
 
     # Always use the CODE folder for component data (not CODE_BP)
     # Loop through each component
@@ -670,6 +688,7 @@ def create_comparison_data(sta, compare_components, sampling, apply_filter=False
 
         # Convert index to date for consistency
         sum_df.index = sum_df.index.date
+        sum_df2 = sum_df.copy()
 
         # Apply filter to component data if requested
         if apply_filter and filter_params:
@@ -721,6 +740,11 @@ def create_comparison_data(sta, compare_components, sampling, apply_filter=False
                     else:
                         with print_lock:
                             print(f"Column {column} not found in comparison components DataFrame")
+
+        f, a = plt.subplots()
+        sum_df2['dU'].plot(ax=a)
+        sum_df['dU'].plot(ax=a)
+        f.savefig('test2.png')
 
         if sampling == '07D':
             sum_df[['gpsweek', 'doy']] = pd.DataFrame(
@@ -1364,9 +1388,17 @@ def create_comparison_plots(sta, df_common, comp_common, differences, stats, red
 def main():
     """Main function to process all stations with enhanced options for component handling."""
     # Parameters to customize analysis
-    sampling = '01D'
-    solution = 'ITRF2020-IGS-RES'
-    stations = ['GOPE']  # Leave empty list to process all available stations
+    # GNSS CASE
+    if 0:
+        sampling = '01D'
+        solution = 'ITRF2020-IGS-RES'
+        stations = ['POTS']
+
+    # SLR CASE
+    if 1:
+        sampling = '07D'
+        solution = 'ITRF2020-ILRS-RES'
+        stations = ['7839']  # Leave empty list to process all available stations
 
     # Define filter parameters
     # Example of a bandpass configuration
@@ -1387,8 +1419,13 @@ def main():
     # Example of a high-pass configuration
     # filter_params = {
     #     'apply_filter': True,
-    #     'lowcut': 1.0 / (30 * 24 * 60 * 60),
+    #     'lowcut': 1.0 / (500 * 24 * 60 * 60),
     #     'order': 3
+    # }
+
+    # Example of a nofilter configuration
+    # filter_params = {
+    #     'apply_filter': False
     # }
 
     # Select which components to remove from the original data (set value to True to remove)
@@ -1410,7 +1447,7 @@ def main():
     }
 
     # Date range for analysis
-    start_date = datetime.date(2000, 1, 1)  # Set to None to use all available data
+    start_date = datetime.date(1995, 1, 1)  # Set to None to use all available data
     end_date = datetime.date(2020, 12, 31)  # Set to None to use all available data
 
     # Find all available stations if none specified
@@ -1525,9 +1562,6 @@ def main():
     with print_lock:
         print(f"\nSummary statistics saved to {summary_file}")
 
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()

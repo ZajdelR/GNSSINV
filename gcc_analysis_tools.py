@@ -179,6 +179,233 @@ def apply_bandpass_filter(signal, lowcut, highcut, sampling_rate, order=4, notch
     return filtered_signal
 
 
+import numpy as np
+from scipy.signal import butter, filtfilt, sosfilt
+from scipy.interpolate import interp1d
+import warnings
+
+
+def apply_bandpass_filter(signal, timestamps=None, lowcut=None, highcut=None,
+                          sampling_rate=None, order=4, notch_width=0.1,
+                          resample_irregular=True, target_interval=1.0):
+    """
+    Apply a Butterworth filter (band-pass, high-pass, or low-pass) to time-series data,
+    handling irregular sampling and gaps in the data.
+
+    Parameters:
+        signal (array-like): The time-series data to filter.
+        timestamps (array-like, optional): Timestamps corresponding to signal values.
+            If provided, used to handle irregular sampling.
+        lowcut (float or None): Low cutoff frequency (Hz).
+        highcut (float or None): High cutoff frequency (Hz).
+        sampling_rate (float, optional): Sampling rate in Hz. If None and timestamps
+            are provided, calculated from timestamps.
+        order (int): Butterworth filter order.
+        notch_width (float): Width of FFT notch (relative to annual frequency).
+        resample_irregular (bool): Whether to resample irregular data to regular intervals.
+        target_interval (float): Target interval for resampling, in the same units as timestamps.
+
+    Returns:
+        dict: A dictionary containing:
+            - 'filtered_signal': Filtered signal with NaNs preserved
+            - 'timestamps': Original or regular timestamps
+            - 'sampling_rate': Effective sampling rate used
+    """
+    if signal is None or len(signal) == 0:
+        return {'filtered_signal': signal, 'timestamps': timestamps, 'sampling_rate': sampling_rate}
+
+    # Handle timestamps and calculate sampling rate if not provided
+    is_irregular = False
+    effective_sampling_rate = sampling_rate
+
+    if timestamps is not None:
+        if len(timestamps) != len(signal):
+            raise ValueError("Timestamps and signal must have the same length")
+
+        # Check if sampling is irregular
+        time_diffs = np.diff(timestamps)
+        std_time_diff = np.std(time_diffs)
+        mean_time_diff = np.mean(time_diffs)
+
+        if std_time_diff / mean_time_diff > 0.1:  # More than 10% variation
+            is_irregular = True
+
+        # Calculate sampling rate if not provided
+        if effective_sampling_rate is None:
+            effective_sampling_rate = 1.0 / mean_time_diff
+
+    # If we need to handle irregular sampling and user wants resampling
+    if is_irregular and resample_irregular and timestamps is not None:
+        # Resample to regular intervals
+        regular_timestamps = np.arange(np.min(timestamps), np.max(timestamps) + target_interval, target_interval)
+
+        # Handle gaps by interpolating NaN values for the purpose of resampling
+        valid_mask = ~np.isnan(signal)
+
+        # If there are no valid values, return original signal
+        if not np.any(valid_mask):
+            return {'filtered_signal': signal, 'timestamps': timestamps, 'sampling_rate': effective_sampling_rate}
+
+        # If there are some valid values but also NaNs
+        if np.any(~valid_mask):
+            # Use valid values for interpolation
+            valid_timestamps = timestamps[valid_mask]
+            valid_signal = signal[valid_mask]
+
+            # Check if we have enough points for interpolation
+            if len(valid_timestamps) < 2:
+                return {'filtered_signal': signal, 'timestamps': timestamps, 'sampling_rate': effective_sampling_rate}
+
+            # Create interpolator
+            interpolator = interp1d(valid_timestamps, valid_signal,
+                                    bounds_error=False, fill_value=np.nan)
+
+            # Generate regular signal
+            regular_signal = interpolator(regular_timestamps)
+        else:
+            # No NaNs, simple resampling
+            interpolator = interp1d(timestamps, signal, bounds_error=False, fill_value=np.nan)
+            regular_signal = interpolator(regular_timestamps)
+
+        # Update variables for filtering
+        signal_to_filter = regular_signal
+        effective_sampling_rate = 1.0 / target_interval
+        effective_timestamps = regular_timestamps
+
+    else:
+        # Use original signal, but interpolate NaNs for filtering
+        signal_to_filter = np.copy(signal)
+        nan_indices = np.isnan(signal_to_filter)
+        effective_timestamps = timestamps
+
+        if np.any(nan_indices):
+            if timestamps is not None:
+                # Interpolate based on timestamps
+                valid_indices = ~nan_indices
+                if np.sum(valid_indices) >= 2:  # Need at least 2 points for interpolation
+                    valid_timestamps = timestamps[valid_indices]
+                    valid_values = signal_to_filter[valid_indices]
+
+                    # Create interpolator for NaN values
+                    interpolator = interp1d(valid_timestamps, valid_values,
+                                            bounds_error=False,
+                                            fill_value=(valid_values[0], valid_values[-1]))
+
+                    signal_to_filter[nan_indices] = interpolator(timestamps[nan_indices])
+                else:
+                    warnings.warn("Not enough valid data points for interpolation")
+                    return {'filtered_signal': signal, 'timestamps': timestamps,
+                            'sampling_rate': effective_sampling_rate}
+            else:
+                # Interpolate based on indices
+                indices = np.arange(len(signal_to_filter))
+                valid_indices = indices[~nan_indices]
+                valid_values = signal_to_filter[~nan_indices]
+
+                if len(valid_values) >= 2:  # Need at least 2 points for interpolation
+                    signal_to_filter[nan_indices] = np.interp(
+                        indices[nan_indices], valid_indices, valid_values
+                    )
+                else:
+                    warnings.warn("Not enough valid data points for interpolation")
+                    return {'filtered_signal': signal, 'timestamps': timestamps,
+                            'sampling_rate': effective_sampling_rate}
+
+    # Now apply the Butterworth filter
+    nyquist = 0.5 * effective_sampling_rate
+
+    # Ensure filter parameters are within valid range
+    if lowcut is not None:
+        lowcut = max(0.0001 * nyquist, min(lowcut, 0.9999 * nyquist))
+    if highcut is not None:
+        highcut = max(0.0001 * nyquist, min(highcut, 0.9999 * nyquist))
+
+    if lowcut is not None and highcut is not None:
+        # Band-pass filter
+        low = lowcut / nyquist
+        high = highcut / nyquist
+
+        if low >= high:
+            warnings.warn("Lowcut must be less than highcut. Returning original signal.")
+            return {'filtered_signal': signal, 'timestamps': timestamps, 'sampling_rate': effective_sampling_rate}
+
+        try:
+            sos = butter(order, [low, high], btype='band', output='sos')
+            filtered_signal = sosfilt(sos, signal_to_filter)
+            # Apply second time for zero-phase (equivalent to filtfilt)
+            filtered_signal = sosfilt(sos, filtered_signal[::-1])[::-1]
+        except Exception as e:
+            warnings.warn(f"Filter error: {str(e)}. Using safer method.")
+            b, a = butter(order, [low, high], btype='band')
+            filtered_signal = filtfilt(b, a, signal_to_filter)
+
+    elif lowcut is not None and highcut is None:
+        # High-pass filter
+        low = lowcut / nyquist
+
+        try:
+            sos = butter(order, low, btype='high', output='sos')
+            filtered_signal = sosfilt(sos, signal_to_filter)
+            # Apply second time for zero-phase
+            filtered_signal = sosfilt(sos, filtered_signal[::-1])[::-1]
+        except Exception as e:
+            warnings.warn(f"Filter error: {str(e)}. Using safer method.")
+            b, a = butter(order, low, btype='high')
+            filtered_signal = filtfilt(b, a, signal_to_filter)
+
+    elif lowcut is None and highcut is not None:
+        # Low-pass filter
+        high = highcut / nyquist
+
+        try:
+            sos = butter(order, high, btype='low', output='sos')
+            lowpassed = sosfilt(sos, signal_to_filter)
+            # Apply second time for zero-phase
+            lowpassed = sosfilt(sos, lowpassed[::-1])[::-1]
+        except Exception as e:
+            warnings.warn(f"Filter error: {str(e)}. Using safer method.")
+            b, a = butter(order, high, btype='low')
+            lowpassed = filtfilt(b, a, signal_to_filter)
+
+        # Calculate annual frequency based on sampling rate
+        if timestamps is not None:
+            # Assume timestamps are in seconds
+            time_unit = np.median(np.diff(timestamps))
+            if time_unit > 60000:  # > ~16 hours, probably in days
+                annual_freq = 1 / 365.25
+            elif time_unit > 600:  # > 10 minutes, probably in hours
+                annual_freq = 1 / (365.25 * 24)
+            else:  # Probably in seconds
+                annual_freq = 1 / (365.25 * 24 * 60 * 60)
+        else:
+            # Assume daily sampling if no timestamps provided
+            annual_freq = 1 / 365.25
+
+        filtered_signal = fft_notch_filter(lowpassed, annual_freq, effective_sampling_rate, width=notch_width)
+
+    else:
+        # No filtering requested
+        return {'filtered_signal': signal, 'timestamps': timestamps, 'sampling_rate': effective_sampling_rate}
+
+    # If we resampled to regular intervals, we need to interpolate back to original timestamps
+    if is_irregular and resample_irregular and timestamps is not None:
+        # Interpolate filtered values back to original timestamps
+        interpolator = interp1d(effective_timestamps, filtered_signal,
+                                bounds_error=False, fill_value=np.nan)
+        final_signal = interpolator(timestamps)
+    else:
+        final_signal = filtered_signal
+
+    # Restore NaN values
+    if np.any(nan_indices):
+        final_signal[nan_indices] = np.nan
+
+    return {
+        'filtered_signal': final_signal,
+        'timestamps': timestamps if timestamps is not None else np.arange(len(signal)),
+        'sampling_rate': effective_sampling_rate
+    }
+
 
 def apply_lowpass_filter(signal, cutoff_frequency, sampling_rate, order=4):
     """
